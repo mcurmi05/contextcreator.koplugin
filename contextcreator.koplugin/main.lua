@@ -212,15 +212,14 @@ function ContextCreator:findSimilarContexts(contexts, word)
 end
 
 --resolve the word to a context, then show its dot points
---an exact (normalized) match opens straight away, otherwise, if similar contexts exist,
---ask whether to add to one of them before creating a brand new context.
+--only an identical title opens straight away, any other match (normalized variants like
+--"Bellona"/"Bellonas", or fuzzy look alikes) goes through the chooser so the user confirms
 function ContextCreator:showEntryEditor(word)
     if normalizeWord(word) == "" then return end
 
     local contexts = self:loadContexts()
-    local key = self:findContextKey(contexts, word)
-    if key then
-        self:openContext(key)
+    if contexts[word] then
+        self:openContext(word)
         return
     end
 
