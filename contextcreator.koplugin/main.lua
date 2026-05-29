@@ -25,6 +25,7 @@ local function normalizeWord(word)
     word = word:lower()
     word = word:gsub("^[%p]+", ""):gsub("[%p]+$", "")    --trim leading/trailing punctuation
     word = word:gsub("['\u{2019}]s$", "")                --possessive, straight or curly apostrophe
+    if #word > 3 then word = word:gsub("s$", "") end     --plural/trailing s (only on longer words, so "bus" stays "bus")
     return word
 end
 
@@ -42,6 +43,17 @@ local BULLET = "\u{2022} "
 --trim leading/trailing whitespace from a string
 local function trim(text)
     return (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+--record a highlighted surface form (e.g. "Mustang's") on a context, de-duped case-insensitively
+local function addVariant(entry, surface)
+    surface = trim(surface)
+    if surface == "" then return end
+    local low = surface:lower()
+    for _, v in ipairs(entry.variants) do
+        if v:lower() == low then return end
+    end
+    table.insert(entry.variants, surface)
 end
 
 function ContextCreator:init()
@@ -112,7 +124,20 @@ function ContextCreator:loadContexts()
     f:close()
     if not content or content == "" then return {} end
     local ok, data = pcall(rapidjson.decode, content)
-    if ok and type(data) == "table" then return data end
+    if ok and type(data) == "table" then
+        --normalize each entry to { points = {...}, variants = {...} }, upgrading the
+        --old format where the value was just a plain array of dot points
+        for title, entry in pairs(data) do
+            if type(entry) ~= "table" then
+                data[title] = { points = {}, variants = { title } }
+            elseif entry.points == nil then
+                data[title] = { points = entry, variants = { title } } -- old array-only format
+            else
+                entry.variants = entry.variants or { title }
+            end
+        end
+        return data
+    end
     logger.warn("ContextCreator: could not parse", self:getBookFilePath())
     return {}
 end
@@ -157,19 +182,22 @@ function ContextCreator:showEntryEditor(word)
 
     local contexts = self:loadContexts()
     local key = self:findContextKey(contexts, word) or word
-    local points = contexts[key] or {}
+    local entry = contexts[key]
 
-    if #points == 0 then
-        self:editPoint(key, nil)
+    --pass the highlighted surface form (word) along so it gets recorded as a variant on save
+    if not entry or #entry.points == 0 then
+        self:editPoint(key, nil, word)
     else
-        self:showPointsList(key)
+        self:showPointsList(key, word)
     end
 end
 
 --show the dot points for a context as a list, with add/edit/delete
-function ContextCreator:showPointsList(key)
+--variant is the surface form just highlighted (if any), carried through to editPoint
+function ContextCreator:showPointsList(key, variant)
     local contexts = self:loadContexts()
-    local points = contexts[key] or {}
+    local entry = contexts[key] or { points = {}, variants = {} }
+    local points = entry.points
 
     local items = {{
         text = _("\u{FF0B} Add dot point"),
@@ -190,7 +218,7 @@ function ContextCreator:showPointsList(key)
         height = Screen:getHeight(),
         onMenuSelect = function(_self, item)
             UIManager:close(menu)
-            self:editPoint(key, item._index) -- _index is nil for the "Add dot point" row
+            self:editPoint(key, item._index, variant) -- _index is nil for the "Add dot point" row
         end,
         close_callback = function()
             UIManager:close(menu)
@@ -201,16 +229,19 @@ end
 
 --edit a single dot point, index == nil means we are adding a new one
 --newlines stay inside the one point, a new point is only made via "Add dot point".
-function ContextCreator:editPoint(key, index)
+--variant is the highlighted surface form to record on this context when something is saved
+function ContextCreator:editPoint(key, index, variant)
     local contexts = self:loadContexts()
-    local points = contexts[key] or {}
+    local entry = contexts[key] or { points = {}, variants = {} }
+    local points = entry.points
     local existing = index and points[index] or ""
 
     local function persist()
         if #points == 0 then
             contexts[key] = nil -- no points left -> drop the context entirely
         else
-            contexts[key] = points
+            entry.points = points
+            contexts[key] = entry
         end
         self:saveContexts(contexts)
     end
@@ -222,7 +253,7 @@ function ContextCreator:editPoint(key, index)
             id = "close",
             callback = function()
                 UIManager:close(dialog)
-                self:returnToList(key)
+                self:returnToList(key, variant)
             end,
         },
     }
@@ -233,7 +264,7 @@ function ContextCreator:editPoint(key, index)
                 table.remove(points, index)
                 persist()
                 UIManager:close(dialog)
-                self:returnToList(key)
+                self:returnToList(key, variant)
             end,
         })
     end
@@ -245,12 +276,14 @@ function ContextCreator:editPoint(key, index)
                 if index then table.remove(points, index) end -- emptied -> delete it
             elseif index then
                 points[index] = text
+                addVariant(entry, variant) -- the highlighted form matched this context
             else
                 table.insert(points, text)
+                addVariant(entry, variant)
             end
             persist()
             UIManager:close(dialog)
-            self:returnToList(key)
+            self:returnToList(key, variant)
         end,
     })
 
@@ -268,10 +301,11 @@ function ContextCreator:editPoint(key, index)
 end
 
 --after editing, reopen the list if anything remains, otherwise return to reading
-function ContextCreator:returnToList(key)
+function ContextCreator:returnToList(key, variant)
     local contexts = self:loadContexts()
-    if contexts[key] and #contexts[key] > 0 then
-        self:showPointsList(key)
+    local entry = contexts[key]
+    if entry and #entry.points > 0 then
+        self:showPointsList(key, variant)
     end
 end
 
@@ -281,9 +315,11 @@ end
 function ContextCreator:showAllContexts()
     local contexts = self:loadContexts()
     local items = {}
-    for title, points in pairs(contexts) do
+    for title, entry in pairs(contexts) do
+        --show every highlighted word that matched this context, e.g. "Mustang, Mustang's"
+        local label = #entry.variants > 0 and table.concat(entry.variants, ", ") or title
         table.insert(items, {
-            text = T("%1  (%2)", title, #points),
+            text = T("%1  (%2)", label, #entry.points),
             _title = title,
         })
     end
