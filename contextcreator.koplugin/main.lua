@@ -1,5 +1,6 @@
 local ButtonDialog = require("ui/widget/buttondialog")
 local DataStorage = require("datastorage")
+local Dispatcher = require("dispatcher")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local Menu = require("ui/widget/menu")
@@ -83,7 +84,18 @@ local function similarity(a, b)
     return 1 - levenshtein(a, b) / math.max(#a, #b)
 end
 
+--register an action so the context viewer can be bound to a gesture, quick menu, entry or profile
+function ContextCreator:onDispatcherRegisterActions()
+    Dispatcher:registerAction("contextcreator_show", {
+        category = "none",
+        event = "ShowContextCreator",
+        title = _("Context Creator: view contexts"),
+        reader = true,
+    })
+end
+
 function ContextCreator:init()
+    self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
 
     --add buttons to the long press/highlight popup
@@ -532,6 +544,12 @@ function ContextCreator:addToMainMenu(menu_items)
         sorting_hint = "navi", --first/navigation tab
         callback = function() self:showAllContexts() end,
     }
+end
+
+--dispatched by the registered contextcreator_show action
+function ContextCreator:onShowContextCreator()
+    self:showAllContexts()
+    return true
 end
 
 return ContextCreator
