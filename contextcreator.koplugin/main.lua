@@ -43,7 +43,7 @@ end
 local BULLET = "\u{2022} "
 
 --margin kept around the context windows so the book stays visible behind them
-local WINDOW_MARGIN = Screen:scaleBySize(40)
+local WINDOW_MARGIN = Screen:scaleBySize(80)
 
 --trim leading/trailing whitespace from a string
 local function trim(text)
