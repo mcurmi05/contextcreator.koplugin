@@ -285,6 +285,9 @@ function ContextCreator:showPointsList(key)
     local points = contexts[key] or {}
 
     local items = {{
+        text = _("\u{2190} All contexts"),
+        _back = true,
+    }, {
         text = _("\u{FF0B} Add dot point"),
         _add = true,
     }}
@@ -304,7 +307,11 @@ function ContextCreator:showPointsList(key)
         is_popout = false, --keep the border but drop Menus rounded corners
         onMenuSelect = function(_self, item)
             UIManager:close(menu)
-            self:editPoint(key, item._index) -- _index is nil for the "Add dot point" row
+            if item._back then
+                self:showAllContexts()
+            else
+                self:editPoint(key, item._index) -- _index is nil for the "Add dot point" row
+            end
         end,
         onMenuHold = function(_self, item)
             if item._index then -- ignore a hold on the "Add dot point" row
