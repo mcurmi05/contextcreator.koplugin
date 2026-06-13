@@ -7,7 +7,6 @@ The idea:
 - For example if you highlight a characters name you can write dot points about them as you go so you have context for later in the book or if you are coming back after not reading for a while
 - Once thats functional I want to be able to create links between multiple of these
 - Want to create a page/file in koreader accessible outside of the book where you can view a list of all of these you have made
-- With the links feature maybe a clickable graph with connections between them? Sounds hard to implement in koreader though
 
 Will be first time writing Lua, have a little bit of experience with Koreader plugins and wanted to make my own.
 
@@ -21,11 +20,10 @@ ln -sfn "$PWD/contextcreator.koplugin" "$HOME/Library/Application Support/koread
 
 Then run `./dev.sh` from the repo root to launch the installed `/Applications/KOReader.app` from the terminal so plugin logs and crashes print to stdout. Edit the repo, quit KOReader, re-run `./dev.sh` to reload (plugins only load at startup). Use `KO_DEBUG=1 ./dev.sh` for verbose logging, or `./dev.sh path/to/book.epub` to open straight into a book.
 
-Another idea: Make the json file for a book importable to a web app for the graph idea? Sounds cool for people who like character maps, especially for when the relationships between contexts feature gets added
 
 ## Implementation Plan: sync server + graph web frontend
 
-The bigger goal is a self hosted server (one Docker container) you can expose to the internet and run 24/7 (or just keep within your local network), so your context files sync between KOReader devices and you can browse + visualise them anywhere. 
+The bigger goal is a self hosted server (one Docker container) you can expose to the internet and run 24/7 (or just keep within your local network, for exposing to the internet I suggest a cloudflare tunnel from personal experience or others have suggested services like tailscale, opening ports on your firewall should be done at your own risk), so your context files sync between KOReader devices and you can browse + visualise them anywhere. 
 
 **What it does**
 
