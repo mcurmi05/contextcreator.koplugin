@@ -61,17 +61,6 @@ function ContextStore:getBookAuthors()
     return props.authors or props.author or props.Author or ""
 end
 
---the page a stored locator falls on, for display (nil if it can't be resolved in this document).
---a paged-doc locator is a { page } table; a reflowable one is a CRE xpointer string.
-function ContextStore:getPageForLocator(pos)
-    if not pos then return nil end
-    local doc = self.ui.document
-    if not doc then return nil end
-    if type(pos) == "table" then return pos.page end
-    local ok, page = pcall(function() return doc:getPageFromXPointer(pos) end)
-    return ok and page or nil
-end
-
 --describe a book locator for the timeline: returns { pos, progress, chapter, page }.
 --pos is the locator we anchored to (the one given, or the current reading position if pos is nil),
 --kept for on-device jump-back. progress is a 0..1 fraction through the book (the universal,

@@ -415,10 +415,12 @@ function ContextView:showPointsList(key)
 
     local items = {}
     for i, point in ipairs(points) do
-        local text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " ") --collapse multi line points to one line for the list
-        local page = self.store:getPageForLocator(ContextSchema.pointPos(point))
-        if page then text = T(_("%1  \u{00B7} p.%2"), text, page) end --show where in the book it was noted
-        table.insert(items, { text = text, _index = i })
+        --dot points are about what you're learning, not bookmarks, so no page shown here.
+        --the location is still stored (long-press a point -> "Go to location" to jump there).
+        table.insert(items, {
+            text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " "), --collapse multi line points to one line
+            _index = i,
+        })
     end
 
     local label = ContextSchema.typeLabel(node.type)
