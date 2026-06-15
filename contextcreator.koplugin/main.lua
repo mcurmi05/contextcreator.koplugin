@@ -29,6 +29,12 @@ function ContextCreator:onDispatcherRegisterActions()
         title = _("Context Creator: view contexts"),
         reader = true,
     })
+    Dispatcher:registerAction("contextcreator_sync", {
+        category = "none",
+        event = "ContextCreatorSync",
+        title = _("Context Creator: sync now"),
+        reader = true,
+    })
 end
 
 function ContextCreator:init()
@@ -96,6 +102,12 @@ end
 --dispatched by the registered contextcreator_show action
 function ContextCreator:onShowContextCreator()
     self.view:showAllContexts()
+    return true
+end
+
+--dispatched by the registered contextcreator_sync action (gesture/profile-bindable manual sync)
+function ContextCreator:onContextCreatorSync()
+    if self.sync then self.sync:syncNow(true) end
     return true
 end
 

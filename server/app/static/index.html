@@ -37,12 +37,32 @@
   <div id="dash" class="card hidden">
     <p>Logged in as <strong id="who"></strong> <button id="logout-btn">Log out</button></p>
 
-    <h2>Books</h2>
-    <ul id="books"></ul>
-    <p id="books-empty" class="muted hidden">No books synced yet.</p>
+    <!-- book list -->
+    <div id="books-view">
+      <h2>Books</h2>
+      <ul id="books"></ul>
+      <p id="books-empty" class="muted hidden">No books synced yet.</p>
+      <p class="muted">To sync from KOReader, open Context Creator &rarr; Sync and log in with this
+      server's address plus your account username and password.</p>
+    </div>
 
-    <p class="muted">To sync from KOReader, open Context Creator &rarr; Sync and enter this server's
-    address plus your account username and password.</p>
+    <!-- one book's contexts -->
+    <div id="book-view" class="hidden">
+      <p><a href="#" id="back-books">&larr; Books</a></p>
+      <h2 id="book-title"></h2>
+      <div class="row">
+        <input id="new-context-title" placeholder="new context name">
+        <select id="new-context-type">
+          <option value="unset">No type</option>
+          <option value="character">Character</option>
+          <option value="place">Location</option>
+          <option value="object">Object</option>
+          <option value="concept">Concept</option>
+        </select>
+        <button id="add-context-btn">Add context</button>
+      </div>
+      <div id="contexts"></div>
+    </div>
   </div>
 
 <script>
@@ -53,6 +73,10 @@ async function api(path, opts) {
 }
 const $ = (id) => document.getElementById(id);
 const show = (id, on) => $(id).classList.toggle("hidden", !on);
+const esc = (s) => (s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const TYPE_LABELS = { character: "Character", place: "Location", object: "Object", concept: "Concept" };
+
+let currentBook = null;
 
 async function refresh() {
   const setup = await api("/api/setup").catch(() => ({ needs_setup: false }));
@@ -65,12 +89,61 @@ async function refresh() {
     const me = await api("/api/me");
     $("who").textContent = me.username;
     show("login", false); show("dash", true);
-    const books = await api("/api/books");
-    $("books").innerHTML = books.map(b => `<li>${b.title || b.book_id} <span class="muted">${b.authors || ""}</span></li>`).join("");
-    show("books-empty", books.length === 0);
+    showBooksList();
   } catch (e) {
     show("dash", false); show("login", true);
   }
+}
+
+async function showBooksList() {
+  currentBook = null;
+  show("books-view", true); show("book-view", false);
+  const books = await api("/api/books");
+  $("books").innerHTML = books.map(b =>
+    `<li><a href="#" data-book="${esc(b.book_id)}">${esc(b.title || b.book_id)}</a> <span class="muted">${esc(b.authors || "")}</span></li>`
+  ).join("");
+  show("books-empty", books.length === 0);
+  $("books").querySelectorAll("a[data-book]").forEach(a =>
+    a.onclick = (e) => { e.preventDefault(); openBook(a.dataset.book); });
+}
+
+async function openBook(book_id) {
+  currentBook = book_id;
+  const doc = await api("/api/books/" + encodeURIComponent(book_id));
+  show("books-view", false); show("book-view", true);
+  $("book-title").textContent = (doc.book && doc.book.title) || book_id;
+  renderContexts(doc);
+}
+
+function renderContexts(doc) {
+  const contexts = doc.contexts || {};
+  const keys = Object.keys(contexts).sort((a, b) =>
+    (contexts[a].title || a).toLowerCase().localeCompare((contexts[b].title || b).toLowerCase()));
+  if (keys.length === 0) { $("contexts").innerHTML = `<p class="muted">No contexts yet.</p>`; return; }
+  $("contexts").innerHTML = keys.map(k => {
+    const c = contexts[k];
+    const label = TYPE_LABELS[c.type] || (c.type && c.type !== "unset" ? c.type : "");
+    const pts = (c.points || []).map(p => `<li>${esc(typeof p === "string" ? p : p.text)}</li>`).join("");
+    return `<div class="card">
+      <strong>${esc(c.title || k)}</strong> <span class="muted">${esc(label)}</span>
+      <ul>${pts || '<li class="muted">no dot points</li>'}</ul>
+      <div class="row">
+        <input placeholder="add a dot point" data-point="${esc(k)}">
+        <button data-addpoint="${esc(k)}">Add</button>
+      </div>
+    </div>`;
+  }).join("");
+  $("contexts").querySelectorAll("button[data-addpoint]").forEach(btn =>
+    btn.onclick = () => addPoint(btn.dataset.addpoint));
+}
+
+async function addPoint(key) {
+  const input = $("contexts").querySelector(`input[data-point="${CSS.escape(key)}"]`);
+  const text = input && input.value.trim();
+  if (!text) return;
+  await api(`/api/books/${encodeURIComponent(currentBook)}/contexts/${encodeURIComponent(key)}/points`,
+    { method: "POST", body: JSON.stringify({ text }) });
+  await openBook(currentBook);
 }
 
 $("setup-btn").onclick = async () => {
@@ -89,6 +162,15 @@ $("login-btn").onclick = async () => {
   } catch (e) { $("login-error").textContent = e.message; }
 };
 $("logout-btn").onclick = async () => { await api("/api/auth/logout", { method: "POST" }); await refresh(); };
+$("back-books").onclick = (e) => { e.preventDefault(); showBooksList(); };
+$("add-context-btn").onclick = async () => {
+  const title = $("new-context-title").value.trim();
+  if (!title || !currentBook) return;
+  await api(`/api/books/${encodeURIComponent(currentBook)}/contexts`,
+    { method: "POST", body: JSON.stringify({ title, type: $("new-context-type").value }) });
+  $("new-context-title").value = "";
+  await openBook(currentBook);
+};
 refresh();
 </script>
 </body>

@@ -10,7 +10,7 @@ authenticates with the same account credentials as the web app (HTTP Basic auth)
 ]]
 
 local InfoMessage = require("ui/widget/infomessage")
-local InputDialog = require("ui/widget/inputdialog")
+local MultiInputDialog = require("ui/widget/multiinputdialog")
 local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
@@ -97,23 +97,33 @@ function ContextSync:syncNow(interactive)
 end
 
 --a single text setting (server url / token), edited through an input dialog
-function ContextSync:editSetting(field, title, hint)
+--one login window: server URL + username + password together (password masked, kept if left blank).
+--saving logs in (enables sync) and does an immediate sync so the user gets instant feedback.
+function ContextSync:showLogin(touchmenu)
     local s = self:settings()
     local dialog
-    dialog = InputDialog:new{
-        title = title,
-        input = s[field] or "",
-        input_hint = hint,
+    dialog = MultiInputDialog:new{
+        title = _("Context Creator sync"),
+        fields = {
+            { text = s.server or "", hint = _("server URL, e.g. http://192.168.1.50:8791") },
+            { text = s.username or "", hint = _("username") },
+            { text = "", hint = (s.password and s.password ~= "") and _("password (leave blank to keep)") or _("password"), text_type = "password" },
+        },
         buttons = {{
             { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
             {
-                text = _("Save"),
-                is_enter_default = true,
+                text = _("Log in"),
                 callback = function()
-                    local v = (dialog:getInputText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
-                    s[field] = v
-                    self:saveSettings(s)
+                    local server, username, password = unpack(dialog:getFields())
+                    local ns = self:settings()
+                    ns.server = (server or ""):gsub("^%s+", ""):gsub("%s+$", ""):gsub("/+$", "")
+                    ns.username = (username or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                    if password and password ~= "" then ns.password = password end
+                    ns.enabled = true -- logging in turns sync on
+                    self:saveSettings(ns)
                     UIManager:close(dialog)
+                    if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
+                    UIManager:scheduleIn(0.3, function() self:syncNow(true) end) -- test the credentials
                 end,
             },
         }},
@@ -137,26 +147,13 @@ function ContextSync:menu()
         {
             text_func = function()
                 local s = self:settings()
-                return T(_("Server URL: %1"), (s.server and s.server ~= "") and s.server or _("not set"))
+                if s.server and s.server ~= "" and s.username and s.username ~= "" then
+                    return T(_("Logged in: %1 @ %2"), s.username, s.server)
+                end
+                return _("Log in\u{2026}")
             end,
             keep_menu_open = true,
-            callback = function() self:editSetting("server", _("Server URL"), _("e.g. http://192.168.1.50:8791")) end,
-        },
-        {
-            text_func = function()
-                local s = self:settings()
-                return T(_("Username: %1"), (s.username and s.username ~= "") and s.username or _("not set"))
-            end,
-            keep_menu_open = true,
-            callback = function() self:editSetting("username", _("Username"), _("your Context Creator account username")) end,
-        },
-        {
-            text_func = function()
-                local s = self:settings()
-                return (s.password and s.password ~= "") and _("Password: set") or _("Password: not set")
-            end,
-            keep_menu_open = true,
-            callback = function() self:editSetting("password", _("Password"), _("your Context Creator account password")) end,
+            callback = function(touchmenu) self:showLogin(touchmenu) end,
         },
         {
             text = _("Sync now"),

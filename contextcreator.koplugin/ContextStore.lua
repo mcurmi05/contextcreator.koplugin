@@ -167,6 +167,7 @@ function ContextStore:load()
     end
 
     ContextSchema.normalize(doc)
+    local ids_added = ContextSchema.ensurePointIds(doc) --legacy/imported points get stable ids for clean sync
 
     --keep the book metadata fresh (cheap, and the id/title can only become known after open)
     doc.book.id = doc.book.id or self:getBookId()
@@ -176,6 +177,9 @@ function ContextStore:load()
     if not doc.book.toc then
         doc.book.toc = self:buildTocSnapshot()
     end
+
+    --persist freshly assigned point ids so they're stable across loads (without triggering a sync)
+    if ids_added then self:replace(doc) end
     return doc
 end
 

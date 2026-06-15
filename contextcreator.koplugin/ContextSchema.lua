@@ -137,6 +137,27 @@ function ContextSchema.newPoint(text, anchor)
     }
 end
 
+--give every point a stable id (and turn any legacy bare-string points into { id, text } tables).
+--returns true if anything changed, so the caller can persist the ids once (they must be stable,
+--or the same legacy point would get a fresh random id each load and duplicate on sync).
+function ContextSchema.ensurePointIds(doc)
+    local changed = false
+    local function fix(points)
+        for i, p in ipairs(points or {}) do
+            if type(p) ~= "table" then
+                points[i] = { id = ContextSchema.genId(), text = tostring(p) }
+                changed = true
+            elseif not p.id then
+                p.id = ContextSchema.genId()
+                changed = true
+            end
+        end
+    end
+    for _, context in pairs(doc.contexts) do fix(context.points) end
+    for _, rel in ipairs(doc.relationships) do fix(rel.points) end
+    return changed
+end
+
 --record a point's deletion so the additive sync merge won't resurrect it from another device
 function ContextSchema.tombstonePoint(doc, point)
     local id = ContextSchema.pointId(point)

@@ -11,15 +11,18 @@ EMPTY_TOMBSTONES = ("contexts", "relationships", "points")
 
 
 def _normalize(doc):
+    #be defensive about types: a client serializing an EMPTY array can send {} (a JSON object) instead
+    #of [], so coerce each field to the shape the merge expects rather than trusting the input.
     doc = dict(doc or {})
-    doc.setdefault("schema", 3)
-    doc.setdefault("book", {})
-    doc.setdefault("updated", 0)
-    doc.setdefault("contexts", {})
-    doc.setdefault("relationships", [])
-    t = dict(doc.get("tombstones") or {})
+    doc["schema"] = doc.get("schema") or 3
+    doc["book"] = doc["book"] if isinstance(doc.get("book"), dict) else {}
+    doc["updated"] = doc.get("updated") or 0
+    doc["contexts"] = doc["contexts"] if isinstance(doc.get("contexts"), dict) else {}
+    doc["relationships"] = doc["relationships"] if isinstance(doc.get("relationships"), list) else []
+    t = doc.get("tombstones") if isinstance(doc.get("tombstones"), dict) else {}
+    t = dict(t)
     for k in EMPTY_TOMBSTONES:
-        t.setdefault(k, {})
+        t[k] = t[k] if isinstance(t.get(k), dict) else {}
     doc["tombstones"] = t
     return doc
 
@@ -48,17 +51,25 @@ def _merge_tombstones(a, b):
 
 
 def _merge_points(points_a, points_b, point_tombstones):
-    #union by id, dropping tombstoned ids. points without an id (legacy/imported) are all kept.
+    #union by id, dropping tombstoned ids.
     by_id = {}
-    loose = []
+    loose_by_text = {}
     for p in list(points_a or []) + list(points_b or []):
-        pid = p.get("id") if isinstance(p, dict) else None
+        if not isinstance(p, dict):
+            loose_by_text.setdefault(str(p), {"text": str(p)})  #bare-string legacy point
+            continue
+        pid = p.get("id")
         if pid is None:
-            loose.append(p)
+            loose_by_text.setdefault(p.get("text", ""), p)  #dedup id-less points by text
             continue
         if pid in point_tombstones:
             continue
         by_id.setdefault(pid, p)  #first occurrence wins; same id => same content (edits churn ids)
+    #an id-less point matching the text of an id'd one is the SAME point from before it had an id:
+    #let the id'd version represent it. this stops a freshly-id'd device point from duplicating the
+    #server's old id-less copy, and means the point can then be deleted via its id (tombstone).
+    id_texts = {(p.get("text") or "") for p in by_id.values()}
+    loose = [p for text, p in loose_by_text.items() if text not in id_texts]
     return list(by_id.values()) + loose
 
 
