@@ -8,9 +8,13 @@ pure, it just works on plain doc tables and has no KOReader or filesystem depend
 doc shape:
   {
     schema = 3,
-    book = { id, title, authors },
+    book = { id, title, authors, toc = { { title, progress }, ... } },  -- toc: chapter bands for the webapp timeline
     updated = <epoch>,                                  -- file-level last change, for cheap sync checks
-    contexts = { [key] = { title, type, points, updated } },  -- key = ContextText.normalizeWord(title)
+    contexts = { [key] = { title, type, points, updated, progress, chapter } },  -- key = normalizeWord(title)
+    -- a point is { text = "...", pos, progress, chapter }. pos is where in the book it was noted (a CRE
+    -- xpointer string / a { page = N } table) for on-device jump-back. progress is a 0..1 fraction through
+    -- the book = the universal, file-independent timeline axis the webapp scrubs. chapter is the TOC title
+    -- there. context-level progress/chapter anchor a context that has no located points. any may be nil.
     relationships = { { id, from, to, label, directed, points, updated }, ... },  -- directed=false means no arrow; missing means directed (made before undirected existed)
     tombstones = { contexts = { [key] = <epoch> }, relationships = { [id] = <epoch> } },
   }
@@ -97,6 +101,18 @@ function ContextSchema.normalize(doc)
     doc.tombstones.relationships = doc.tombstones.relationships or {}
     doc.book = doc.book or {}
     return doc
+end
+
+--read a dot point's text. points are { text, pos } tables, but tolerate a bare string (older/imported data)
+function ContextSchema.pointText(p)
+    if type(p) == "table" then return p.text or "" end
+    return p or ""
+end
+
+--read a dot point's book locator (xpointer string or { page } table), or nil if not anchored
+function ContextSchema.pointPos(p)
+    if type(p) == "table" then return p.pos end
+    return nil
 end
 
 --display title for a context key, falling back to the key itself if the context is gone (defensive)

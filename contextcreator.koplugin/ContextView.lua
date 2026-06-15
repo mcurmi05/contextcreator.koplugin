@@ -182,7 +182,8 @@ end
 
 --resolve a highlighted word to a node, then start adding a dot point to it.
 --an exact (normalized) match goes straight to a new dot point; fuzzy look-alikes go through the chooser.
-function ContextView:showEntryEditor(word)
+--pos is the book locator of the highlight, carried so the new point can be anchored to it.
+function ContextView:showEntryEditor(word, pos)
     local key = ContextText.normalizeWord(word)
     if key == "" then return end
 
@@ -190,20 +191,20 @@ function ContextView:showEntryEditor(word)
     local node = doc.contexts[key]
     if node then
         --exact match: add a point to it, with the option to redirect to a different context
-        self:editPoint(key, node.title, nil, nil, true)
+        self:editPoint(key, node.title, nil, nil, true, pos)
         return
     end
 
     local similar = self:findSimilarNodes(doc, word)
     if #similar > 0 then
-        self:showSimilarChooser(word, similar)
+        self:showSimilarChooser(word, similar, pos)
     else
-        self:createNewContext(ContextText.trim(word)) -- brand new, run the name -> type -> point setup
+        self:createNewContext(ContextText.trim(word), pos) -- brand new, run the name -> type -> point setup
     end
 end
 
 --ask the user whether the word belongs to one of the similar existing contexts
-function ContextView:showSimilarChooser(word, similar)
+function ContextView:showSimilarChooser(word, similar, pos)
     local dialog
     local buttons = {}
     for i = 1, #similar do
@@ -212,7 +213,7 @@ function ContextView:showSimilarChooser(word, similar)
             text = T(_("Add to \u{201C}%1\u{201D}"), m.title),
             callback = function()
                 UIManager:close(dialog)
-                self:editPoint(m.key, m.title, nil, nil, true) -- existing context, jump to a new dot point (redirectable)
+                self:editPoint(m.key, m.title, nil, nil, true, pos) -- existing context, jump to a new dot point (redirectable)
             end,
         }})
     end
@@ -220,7 +221,7 @@ function ContextView:showSimilarChooser(word, similar)
         text = _("Create new context instead"),
         callback = function()
             UIManager:close(dialog)
-            self:createNewContext(ContextText.trim(word))
+            self:createNewContext(ContextText.trim(word), pos)
         end,
     }})
     table.insert(buttons, {{
@@ -236,8 +237,9 @@ function ContextView:showSimilarChooser(word, similar)
     UIManager:show(dialog)
 end
 
---brand new context setup, step 1: confirm/edit the name (prefilled from the highlighted word)
-function ContextView:createNewContext(name)
+--brand new context setup, step 1: confirm/edit the name (prefilled from the highlighted word).
+--pos carries the highlight location through to the first dot point.
+function ContextView:createNewContext(name, pos)
     --do we already have any contexts? if so we can offer to pick one instead of making a new one
     local has_existing = next(self.store:load().contexts) ~= nil
 
@@ -261,9 +263,9 @@ function ContextView:createNewContext(name)
                 local doc = self.store:load()
                 local existing = doc.contexts[key]
                 if existing then
-                    self:editPoint(key, existing.title, nil, nil, true)
+                    self:editPoint(key, existing.title, nil, nil, true, pos)
                 else
-                    self:chooseTypeForNewContext(key, title)
+                    self:chooseTypeForNewContext(key, title, pos)
                 end
             end,
         },
@@ -275,7 +277,7 @@ function ContextView:createNewContext(name)
             text = _("Select existing context instead"),
             callback = function()
                 UIManager:close(dialog)
-                self:showExistingContextPicker()
+                self:showExistingContextPicker(pos)
             end,
         }})
     end
@@ -291,7 +293,7 @@ function ContextView:createNewContext(name)
 end
 
 --pick from the contexts already in this book, then jump straight to a new dot point for it
-function ContextView:showExistingContextPicker()
+function ContextView:showExistingContextPicker(pos)
     local doc = self.store:load()
     local items = {}
     for key, node in pairs(doc.contexts) do
@@ -316,7 +318,7 @@ function ContextView:showExistingContextPicker()
         is_popout = false,
         onMenuSelect = function(_self, item)
             UIManager:close(menu)
-            self:editPoint(item._key, item._title, nil, nil, true)
+            self:editPoint(item._key, item._title, nil, nil, true, pos)
         end,
         close_callback = function() UIManager:close(menu) end,
     }
@@ -324,7 +326,7 @@ function ContextView:showExistingContextPicker()
 end
 
 --brand new context setup, step 2: pick a type, then drop into the first dot point
-function ContextView:chooseTypeForNewContext(key, title)
+function ContextView:chooseTypeForNewContext(key, title, pos)
     local doc = self.store:load()
     local dialog
     --apply the chosen type then go to the first dot point. a real/custom type is saved up front so the
@@ -334,11 +336,16 @@ function ContextView:chooseTypeForNewContext(key, title)
         if t ~= "unset" then
             local d = self.store:load()
             if not d.contexts[key] then
-                d.contexts[key] = { title = title, type = t, points = {}, updated = ContextSchema.now() }
+                --anchor the new context to the reading position so it has a timeline slot
+                local a = self.store:describeLocator(pos) or {}
+                d.contexts[key] = {
+                    title = title, type = t, points = {}, updated = ContextSchema.now(),
+                    progress = a.progress, chapter = a.chapter,
+                }
                 self.store:save(d)
             end
         end
-        self:editPoint(key, title, nil, true) -- allow "Skip for now" on the first point
+        self:editPoint(key, title, nil, true, false, pos) -- allow "Skip for now" on the first point
     end
 
     local buttons = {}
@@ -408,10 +415,10 @@ function ContextView:showPointsList(key)
 
     local items = {}
     for i, point in ipairs(points) do
-        table.insert(items, {
-            text = BULLET .. point:gsub("%s*\n%s*", " "), --collapse multi line points to one line for the list
-            _index = i,
-        })
+        local text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " ") --collapse multi line points to one line for the list
+        local page = self.store:getPageForLocator(ContextSchema.pointPos(point))
+        if page then text = T(_("%1  \u{00B7} p.%2"), text, page) end --show where in the book it was noted
+        table.insert(items, { text = text, _index = i })
     end
 
     local label = ContextSchema.typeLabel(node.type)
@@ -456,33 +463,48 @@ function ContextView:showPointsList(key)
     UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
 end
 
---long-press a dot point, offer to delete it
+--long-press a dot point: jump to where it was noted (if anchored), or delete it
 function ContextView:showPointActions(menu, key, index)
+    local doc = self.store:load()
+    local node = doc.contexts[key]
+    local pos = node and node.points[index] and ContextSchema.pointPos(node.points[index])
+
     local dialog
+    local buttons = {}
+    if pos then
+        table.insert(buttons, {{
+            text = _("Go to location"),
+            callback = function()
+                UIManager:close(dialog)
+                UIManager:close(menu)
+                self.store:gotoLocator(pos)
+            end,
+        }})
+    end
+    table.insert(buttons, {{
+        text = _("Delete"),
+        callback = function()
+            UIManager:close(dialog)
+            local d = self.store:load()
+            local n = d.contexts[key]
+            if n then
+                table.remove(n.points, index)
+                n.updated = ContextSchema.now()
+                self.store:save(d)
+            end
+            UIManager:close(menu)
+            self:returnToList(key)
+        end,
+    }})
+    table.insert(buttons, {{
+        text = _("Cancel"),
+        callback = function() UIManager:close(dialog) end,
+    }})
+
     dialog = ButtonDialog:new{
-        title = _("Delete this dot point?"),
+        title = pos and _("Dot point") or _("Delete this dot point?"),
         title_align = "center",
-        buttons = {
-            {{
-                text = _("Delete"),
-                callback = function()
-                    UIManager:close(dialog)
-                    local doc = self.store:load()
-                    local node = doc.contexts[key]
-                    if node then
-                        table.remove(node.points, index)
-                        node.updated = ContextSchema.now()
-                        self.store:save(doc)
-                    end
-                    UIManager:close(menu)
-                    self:returnToList(key)
-                end,
-            }},
-            {{
-                text = _("Cancel"),
-                callback = function() UIManager:close(dialog) end,
-            }},
-        },
+        buttons = buttons,
     }
     UIManager:show(dialog)
 end
@@ -493,18 +515,31 @@ end
 --user can initialise the context without writing a point yet.
 --allow_redirect adds an "Add dot point to different context instead" button (used when we landed
 --here from "Add to context") so the user can send the point to another context.
+--pos is a book locator for a NEW point, anchoring it to where it was noted (editing keeps the old pos).
 --newlines stay inside the one point, a new point is only made via "Add dot point".
-function ContextView:editPoint(key, title, index, allow_skip, allow_redirect)
+function ContextView:editPoint(key, title, index, allow_skip, allow_redirect, pos)
     local doc = self.store:load()
     local node = doc.contexts[key]
     local points = node and node.points or {}
     title = (node and node.title) or title or key
-    local existing = index and points[index] or ""
+    local existing = index and ContextSchema.pointText(points[index]) or ""
 
-    --create the node on disk if it isnt there yet, with the given type (defaults to unset)
+    --resolve the book anchor (highlight pos, or current reading position) once, lazily, only if we
+    --actually create something. gives { pos, progress, chapter } for the timeline.
+    local anchor
+    local function getAnchor()
+        if anchor == nil then anchor = self.store:describeLocator(pos) or {} end
+        return anchor
+    end
+
+    --create the node on disk if it isnt there yet, with the given type (defaults to unset).
+    --stamp it with the reading position so it has a timeline slot even before any located point.
     local function ensureNode(node_type)
         if not node then
+            local a = getAnchor()
             node = { title = title, type = node_type or "unset", points = points, updated = ContextSchema.now() }
+            if a.progress then node.progress = a.progress end
+            if a.chapter then node.chapter = a.chapter end
             doc.contexts[key] = node
         end
         return node
@@ -539,9 +574,17 @@ function ContextView:editPoint(key, title, index, allow_skip, allow_redirect)
                 if text == "" then
                     if index then table.remove(points, index) end -- emptied -> delete it
                 elseif index then
-                    points[index] = text
+                    --edit in place, keeping the point's existing location
+                    local p = points[index]
+                    if type(p) == "table" then p.text = text else points[index] = { text = text } end
                 else
-                    table.insert(points, text)
+                    --new point, anchored to where it was noted (for jump-back + the timeline)
+                    local a = getAnchor()
+                    local p = { text = text }
+                    if a.pos ~= nil then p.pos = a.pos end
+                    if a.progress then p.progress = a.progress end
+                    if a.chapter then p.chapter = a.chapter end
+                    table.insert(points, p)
                 end
                 persist()
                 UIManager:close(dialog)
@@ -1060,7 +1103,7 @@ function ContextView:showRelationshipView(rel_id)
     local items = {}
     for i, point in ipairs(rel.points) do
         table.insert(items, {
-            text = BULLET .. point:gsub("%s*\n%s*", " "),
+            text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " "),
             _index = i,
         })
     end
@@ -1194,7 +1237,7 @@ function ContextView:editRelPoint(rel_id, index)
     local doc = self.store:load()
     local rel = ContextSchema.findRel(doc, rel_id)
     if not rel then return end
-    local existing = index and rel.points[index] or ""
+    local existing = index and ContextSchema.pointText(rel.points[index]) or ""
 
     local dialog
     dialog = InputDialog:new{
@@ -1220,9 +1263,10 @@ function ContextView:editRelPoint(rel_id, index)
                     if text == "" then
                         if index then table.remove(rel.points, index) end
                     elseif index then
-                        rel.points[index] = text
+                        local p = rel.points[index]
+                        if type(p) == "table" then p.text = text else rel.points[index] = { text = text } end
                     else
-                        table.insert(rel.points, text)
+                        table.insert(rel.points, { text = text })
                     end
                     rel.updated = ContextSchema.now()
                     self.store:save(doc)

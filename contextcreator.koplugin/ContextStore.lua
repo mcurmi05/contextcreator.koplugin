@@ -7,6 +7,7 @@ plugin only ever talks to load()/save(), it never touches the filesystem directl
 ]]
 
 local DataStorage = require("datastorage")
+local Event = require("ui/event")
 local rapidjson = require("rapidjson")
 local util = require("util")
 local logger = require("logger")
@@ -60,6 +61,99 @@ function ContextStore:getBookAuthors()
     return props.authors or props.author or props.Author or ""
 end
 
+--the page a stored locator falls on, for display (nil if it can't be resolved in this document).
+--a paged-doc locator is a { page } table; a reflowable one is a CRE xpointer string.
+function ContextStore:getPageForLocator(pos)
+    if not pos then return nil end
+    local doc = self.ui.document
+    if not doc then return nil end
+    if type(pos) == "table" then return pos.page end
+    local ok, page = pcall(function() return doc:getPageFromXPointer(pos) end)
+    return ok and page or nil
+end
+
+--describe a book locator for the timeline: returns { pos, progress, chapter, page }.
+--pos is the locator we anchored to (the one given, or the current reading position if pos is nil),
+--kept for on-device jump-back. progress is a 0..1 fraction through the book (the universal,
+--file-independent timeline axis the webapp scrubs). chapter is the TOC title at that spot.
+--all fields are best-effort, any may be nil. computed here because only the device has the book.
+function ContextStore:describeLocator(pos)
+    local ui = self.ui
+    local doc = ui.document
+    local res = {}
+    if not doc then return res end
+
+    if ui.rolling then
+        --reflowable (epub/CRE): everything keys off an xpointer
+        local xp = (type(pos) == "string") and pos or nil
+        if not xp then
+            local ok, cur = pcall(function() return doc:getXPointer() end)
+            xp = ok and cur or nil
+        end
+        if xp then
+            res.pos = xp
+            local height = doc.info and doc.info.doc_height
+            local ok, y = pcall(function() return doc:getPosFromXPointer(xp) end)
+            if ok and y and height and height > 0 then res.progress = y / height end
+            local okp, page = pcall(function() return doc:getPageFromXPointer(xp) end)
+            if okp then res.page = page end
+            if ui.toc then
+                local okc, ch = pcall(function() return ui.toc:getTocTitleByPage(xp) end)
+                if okc and ch and ch ~= "" then res.chapter = ch end
+            end
+        end
+    else
+        --paged (pdf): key off the page number
+        local page = (type(pos) == "table" and pos.page) or (ui.paging and ui.paging.current_page)
+        if page then
+            res.pos = { page = page }
+            res.page = page
+            local okn, total = pcall(function() return doc:getPageCount() end)
+            if okn and total and total > 0 then res.progress = page / total end
+            if ui.toc then
+                local okc, ch = pcall(function() return ui.toc:getTocTitleByPage(page) end)
+                if okc and ch and ch ~= "" then res.chapter = ch end
+            end
+        end
+    end
+    return res
+end
+
+--snapshot the book's chapter list as { { title, progress }, ... } so the webapp can draw labelled
+--chapter bands on the timeline without needing the book file. best-effort, nil if no TOC.
+function ContextStore:buildTocSnapshot()
+    local ui = self.ui
+    local toc = ui.toc and ui.toc.toc
+    if not toc or #toc == 0 then return nil end
+    local out = {}
+    for _, item in ipairs(toc) do
+        local locator = item.xpointer or (item.page and { page = item.page }) or nil
+        local a = self:describeLocator(locator)
+        if a.progress then
+            out[#out + 1] = { title = item.title, progress = a.progress }
+        end
+    end
+    if #out == 0 then return nil end
+    return out
+end
+
+--jump the reader to a stored locator (pushing the current spot onto the back stack first so the
+--reader's "back" returns here). returns true if it could navigate.
+function ContextStore:gotoLocator(pos)
+    if not pos then return false end
+    local ui = self.ui
+    if ui.rolling and type(pos) == "string" then
+        if ui.link then ui.link:addCurrentLocationToStack() end
+        ui.rolling:onGotoXPointer(pos, pos) -- second arg shows the position marker
+        return true
+    elseif type(pos) == "table" and pos.page then
+        if ui.link then ui.link:addCurrentLocationToStack() end
+        ui:handleEvent(Event:new("GotoPage", pos.page))
+        return true
+    end
+    return false
+end
+
 --load the document for the current book.
 --always returns a well-shaped doc, even when the file is missing or unreadable.
 function ContextStore:load()
@@ -89,6 +183,10 @@ function ContextStore:load()
     doc.book.id = doc.book.id or self:getBookId()
     doc.book.title = self:getBookTitle()
     doc.book.authors = self:getBookAuthors()
+    --snapshot the chapter list once so the webapp timeline can show chapter bands without the book
+    if not doc.book.toc then
+        doc.book.toc = self:buildTocSnapshot()
+    end
     return doc
 end
 

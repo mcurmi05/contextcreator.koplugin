@@ -43,10 +43,12 @@ function ContextCreator:init()
             return {
                 text = _("Add to context"),
                 callback = function()
-                    local word = this.selected_text and this.selected_text.text
+                    local sel = this.selected_text
+                    local word = sel and sel.text
+                    local pos = sel and sel.pos0 -- where in the book this was highlighted
                     this:onClose()
                     if word and word ~= "" then
-                        self.view:showEntryEditor(word)
+                        self.view:showEntryEditor(word, pos)
                     end
                 end,
             }
