@@ -19,6 +19,9 @@ local ContextSyncClient = require("ContextSyncClient")
 
 --how long after the last change before we actually push (coalesces a burst of edits into one sync)
 local DEBOUNCE_SECONDS = 2
+--how often to poll the server while a book is open, so web edits show up without a manual sync.
+--each tick is skipped instantly when offline, so it won't keep wifi awake on a real device.
+local PERIODIC_SECONDS = 15
 
 local ContextSync = {}
 ContextSync.__index = ContextSync
@@ -58,6 +61,26 @@ function ContextSync:flush()
         UIManager:unschedule(self._pending)
         self._pending = nil
         self:syncNow()
+    end
+end
+
+--poll the server every PERIODIC_SECONDS while the book is open, so changes made on the web (or
+--another device) appear here without a manual sync. reschedules itself; stop with stopPeriodic.
+function ContextSync:startPeriodic()
+    if not self:isConfigured() then return end
+    self:stopPeriodic()
+    self._periodic = function()
+        self._periodic = nil
+        self:syncNow()
+        self:startPeriodic() -- schedule the next tick (no-op if it got disabled meanwhile)
+    end
+    UIManager:scheduleIn(PERIODIC_SECONDS, self._periodic)
+end
+
+function ContextSync:stopPeriodic()
+    if self._periodic then
+        UIManager:unschedule(self._periodic)
+        self._periodic = nil
     end
 end
 
@@ -124,6 +147,7 @@ function ContextSync:showLogin(touchmenu)
                     UIManager:close(dialog)
                     if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
                     UIManager:scheduleIn(0.3, function() self:syncNow(true) end) -- test the credentials
+                    self:startPeriodic() -- begin polling without needing to reopen the book
                 end,
             },
         }},

@@ -193,7 +193,11 @@ function ContextStore:save(doc)
         if self.on_change and not self._suppress then self.on_change() end
         return
     end
-    doc.updated = ContextSchema.now()
+    --bump the change clock, unless we're adopting an already-merged doc (replace), where we keep the
+    --server's `updated` so periodic syncs don't look like endless changes to the other side
+    if not self._keep_updated then
+        doc.updated = ContextSchema.now()
+    end
 
     --tag the array-typed fields so rapidjson serializes them as JSON arrays. without this an empty
     --array encodes as {} (an object), reloads object-typed, and items appended later get silently
@@ -224,8 +228,10 @@ end
 --write a full document verbatim (e.g. one adopted from a sync merge), WITHOUT firing on_change,
 --so adopting the server's result doesn't loop back into another sync.
 function ContextStore:replace(doc)
-    self._suppress = true
+    self._suppress = true       --don't fire on_change (no sync loop)
+    self._keep_updated = true   --keep the adopted doc's `updated` as-is
     self:save(doc)
+    self._keep_updated = false
     self._suppress = false
 end
 

@@ -95,10 +95,7 @@ async function refresh() {
   }
 }
 
-async function showBooksList() {
-  currentBook = null;
-  show("books-view", true); show("book-view", false);
-  const books = await api("/api/books");
+function renderBooks(books) {
   $("books").innerHTML = books.map(b =>
     `<li><a href="#" data-book="${esc(b.book_id)}">${esc(b.title || b.book_id)}</a> <span class="muted">${esc(b.authors || "")}</span></li>`
   ).join("");
@@ -107,9 +104,18 @@ async function showBooksList() {
     a.onclick = (e) => { e.preventDefault(); openBook(a.dataset.book); });
 }
 
+async function showBooksList() {
+  currentBook = null;
+  show("books-view", true); show("book-view", false);
+  const books = await api("/api/books");
+  lastBooksSig = JSON.stringify(books.map(b => [b.book_id, b.updated]));
+  renderBooks(books);
+}
+
 async function openBook(book_id) {
   currentBook = book_id;
   const doc = await api("/api/books/" + encodeURIComponent(book_id));
+  lastBookUpdated = doc.updated;
   show("books-view", false); show("book-view", true);
   $("book-title").textContent = (doc.book && doc.book.title) || book_id;
   renderContexts(doc);
@@ -145,6 +151,34 @@ async function addPoint(key) {
     { method: "POST", body: JSON.stringify({ text }) });
   await openBook(currentBook);
 }
+
+//poll so changes synced from KOReader show up without a manual refresh. we only re-render when the
+//data actually changed, and never while you're typing in a field (so it won't eat your input).
+let lastBookUpdated = null, lastBooksSig = null;
+function typingInBookView() {
+  const a = document.activeElement;
+  return a && a.tagName === "INPUT" && $("book-view").contains(a);
+}
+async function poll() {
+  if ($("dash").classList.contains("hidden")) return; //not logged in
+  try {
+    if (currentBook && !$("book-view").classList.contains("hidden")) {
+      const doc = await api("/api/books/" + encodeURIComponent(currentBook));
+      if (doc.updated !== lastBookUpdated) {
+        lastBookUpdated = doc.updated;
+        if (!typingInBookView()) {
+          $("book-title").textContent = (doc.book && doc.book.title) || currentBook;
+          renderContexts(doc);
+        }
+      }
+    } else if (!$("books-view").classList.contains("hidden")) {
+      const books = await api("/api/books");
+      const sig = JSON.stringify(books.map(b => [b.book_id, b.updated]));
+      if (sig !== lastBooksSig) { lastBooksSig = sig; renderBooks(books); }
+    }
+  } catch (e) { /* ignore transient poll errors */ }
+}
+setInterval(poll, 4000);
 
 $("setup-btn").onclick = async () => {
   $("setup-error").textContent = "";

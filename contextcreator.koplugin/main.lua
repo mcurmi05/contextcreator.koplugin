@@ -50,8 +50,10 @@ function ContextCreator:init()
     self.sync = ContextSync:new(self.store)
     self.store.on_change = function() self.sync:scheduleSync() end
     if self.sync:isConfigured() then
-        --pull server changes shortly after the book opens (don't block the open)
+        --pull server changes shortly after the book opens (don't block the open), then keep polling
+        --periodically so web/other-device edits show up without a manual sync
         UIManager:scheduleIn(1, function() self.sync:syncNow() end)
+        self.sync:startPeriodic()
     end
 
     --add buttons to the long press/highlight popup
@@ -111,9 +113,12 @@ function ContextCreator:onContextCreatorSync()
     return true
 end
 
---flush any pending sync when the book closes so changes don't wait for next open
+--stop polling and flush any pending sync when the book closes
 function ContextCreator:onCloseDocument()
-    if self.sync then self.sync:flush() end
+    if self.sync then
+        self.sync:stopPeriodic()
+        self.sync:flush()
+    end
 end
 
 return ContextCreator
