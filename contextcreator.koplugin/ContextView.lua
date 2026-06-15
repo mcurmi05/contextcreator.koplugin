@@ -948,7 +948,7 @@ function ContextView:showLinkPicker(menu, from_key)
 
     if #items == 0 then
         UIManager:show(InfoMessage:new{
-            text = _("There is no other context to link to yet.\n\nAdd another context first, then link them."),
+            text = _("There is no other context to link to yet."),
         })
         return
     end
@@ -1066,7 +1066,7 @@ function ContextView:showRelationships(key)
 
     if #items == 0 then
         UIManager:show(InfoMessage:new{
-            text = key and _("No relationships for this context yet.\n\nLong-press it and choose \"Link to\u{2026}\" to add one.")
+            text = key and _("No relationships for this context yet.\nLong press it and choose \"Link to\u{2026}\" to add one.")
                 or _("No relationships in this book yet.\n\nLong-press a context and choose \"Link to\u{2026}\" to add one."),
         })
         return
