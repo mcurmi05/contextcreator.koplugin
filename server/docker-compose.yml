@@ -1,0 +1,13 @@
+services:
+  contextcreator:
+    build: .
+    ports:
+      - "8791:8791" 
+    environment:
+      - CONTEXT_DB_PATH=/data/contextcreator.db
+    volumes:
+      - cc_data:/data
+    restart: unless-stopped
+
+volumes:
+  cc_data:

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context Creator</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h1 { font-weight: 600; }
+  input, button { font-size: 1rem; padding: 8px; margin: 4px 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .hidden { display: none; }
+  .muted { color: #666; }
+  code { background: #f2f2f2; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 16px 0; }
+</style>
+</head>
+<body>
+  <h1>Context Creator</h1>
+
+  <div id="setup" class="card hidden">
+    <h2>Create your admin account</h2>
+    <div><input id="setup-username" placeholder="username" autocomplete="username"></div>
+    <div><input id="setup-password" type="password" placeholder="password" autocomplete="new-password"></div>
+    <button id="setup-btn">Create account</button>
+    <p id="setup-error" class="muted"></p>
+  </div>
+
+  <div id="login" class="card hidden">
+    <h2>Log in</h2>
+    <div><input id="username" placeholder="username" autocomplete="username"></div>
+    <div><input id="password" type="password" placeholder="password" autocomplete="current-password"></div>
+    <button id="login-btn">Log in</button>
+    <p id="login-error" class="muted"></p>
+  </div>
+
+  <div id="dash" class="card hidden">
+    <p>Logged in as <strong id="who"></strong> <button id="logout-btn">Log out</button></p>
+
+    <h2>Books</h2>
+    <ul id="books"></ul>
+    <p id="books-empty" class="muted hidden">No books synced yet.</p>
+
+    <h2>Device sync token</h2>
+    <p class="muted">Generate a token to paste into the KOReader plugin. Shown once.</p>
+    <div class="row">
+      <input id="device-name" placeholder="device name (e.g. Kobo)">
+      <button id="device-btn">Generate</button>
+    </div>
+    <p id="device-token"></p>
+  </div>
+
+<script>
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res.json();
+}
+const $ = (id) => document.getElementById(id);
+const show = (id, on) => $(id).classList.toggle("hidden", !on);
+
+async function refresh() {
+  const setup = await api("/api/setup").catch(() => ({ needs_setup: false }));
+  if (setup.needs_setup) {
+    show("setup", true); show("login", false); show("dash", false);
+    return;
+  }
+  show("setup", false);
+  try {
+    const me = await api("/api/me");
+    $("who").textContent = me.username;
+    show("login", false); show("dash", true);
+    const books = await api("/api/books");
+    $("books").innerHTML = books.map(b => `<li>${b.title || b.book_id} <span class="muted">${b.authors || ""}</span></li>`).join("");
+    show("books-empty", books.length === 0);
+  } catch (e) {
+    show("dash", false); show("login", true);
+  }
+}
+
+$("setup-btn").onclick = async () => {
+  $("setup-error").textContent = "";
+  try {
+    await api("/api/setup", { method: "POST", body: JSON.stringify({ username: $("setup-username").value, password: $("setup-password").value }) });
+    await refresh();
+  } catch (e) { $("setup-error").textContent = e.message; }
+};
+
+$("login-btn").onclick = async () => {
+  $("login-error").textContent = "";
+  try {
+    await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username: $("username").value, password: $("password").value }) });
+    await refresh();
+  } catch (e) { $("login-error").textContent = e.message; }
+};
+$("logout-btn").onclick = async () => { await api("/api/auth/logout", { method: "POST" }); await refresh(); };
+$("device-btn").onclick = async () => {
+  try {
+    const d = await api("/api/devices", { method: "POST", body: JSON.stringify({ name: $("device-name").value }) });
+    $("device-token").innerHTML = `Token for <strong>${d.name}</strong>: <code>${d.token}</code>`;
+  } catch (e) { $("device-token").textContent = e.message; }
+};
+refresh();
+</script>
+</body>
+</html>
