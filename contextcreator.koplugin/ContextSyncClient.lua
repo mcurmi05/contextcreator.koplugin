@@ -1,11 +1,12 @@
 --[[
-thin http client for the sync server. sends the device bearer token, talks json, and uses
-socketutil timeouts so a slow/dead server can't hang the reader for long. http and https both work.
-modeled on koreaders own kosync client, just simpler (socket.http + ltn12 instead of Spore).
+thin http client for the sync server. authenticates with the account's username + password via HTTP
+Basic auth (same idea as kosync), talks json, and uses socketutil timeouts so a slow/dead server
+can't hang the reader for long. http and https both work.
 ]]
 
 local http = require("socket.http")
 local ltn12 = require("ltn12")
+local mime = require("mime")
 local socketutil = require("socketutil")
 local rapidjson = require("rapidjson")
 local logger = require("logger")
@@ -17,15 +18,18 @@ local TOTAL_TIMEOUT = 30
 local ContextSyncClient = {}
 ContextSyncClient.__index = ContextSyncClient
 
-function ContextSyncClient:new(server, token)
-    return setmetatable({ server = (server or ""):gsub("/+$", ""), token = token or "" }, ContextSyncClient)
+function ContextSyncClient:new(server, username, password)
+    return setmetatable({
+        server = (server or ""):gsub("/+$", ""),
+        auth = "Basic " .. mime.b64((username or "") .. ":" .. (password or "")),
+    }, ContextSyncClient)
 end
 
 --make a request, returns (ok, decoded_response_or_error). body is an optional lua table (sent as json).
 function ContextSyncClient:request(method, path, body)
     local url = self.server .. path
     local headers = {
-        ["Authorization"] = "Bearer " .. self.token,
+        ["Authorization"] = self.auth,
         ["Accept"] = "application/json",
     }
     local source

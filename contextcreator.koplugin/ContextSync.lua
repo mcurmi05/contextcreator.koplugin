@@ -5,7 +5,8 @@ merged result, which we adopt back locally. that one push-and-adopt covers both 
 triggered debounced after every change (via the store's on_change), on book open, and flushed on
 close. fully best-effort: if it's not configured or there's no network it just no-ops, the local
 json stays the source of truth, and it retries on the next trigger. settings live in
-G_reader_settings under "contextcreator_sync" = { enabled, server, token }.
+G_reader_settings under "contextcreator_sync" = { enabled, server, username, password }; the plugin
+authenticates with the same account credentials as the web app (HTTP Basic auth).
 ]]
 
 local InfoMessage = require("ui/widget/infomessage")
@@ -36,7 +37,8 @@ end
 
 function ContextSync:isConfigured()
     local s = self:settings()
-    return s.enabled == true and s.server and s.server ~= "" and s.token and s.token ~= ""
+    return s.enabled == true and s.server and s.server ~= ""
+        and s.username and s.username ~= "" and s.password and s.password ~= ""
 end
 
 --schedule a push DEBOUNCE_SECONDS after the latest change, replacing any pending one (trailing debounce)
@@ -63,7 +65,7 @@ end
 function ContextSync:syncNow(interactive)
     if not self:isConfigured() then
         if interactive then
-            UIManager:show(InfoMessage:new{ text = _("Sync isn't set up. Set the server URL and device token first.") })
+            UIManager:show(InfoMessage:new{ text = _("Sync isn't set up. Set the server URL, username and password first.") })
         end
         return
     end
@@ -82,7 +84,7 @@ function ContextSync:syncNow(interactive)
     end
 
     local s = self:settings()
-    local client = ContextSyncClient:new(s.server, s.token)
+    local client = ContextSyncClient:new(s.server, s.username, s.password)
     local ok, merged = client:pushBook(book_id, self.store:load())
     if ok and type(merged) == "table" and merged.contexts then
         self.store:replace(merged) -- adopt the merged result without re-triggering a sync
@@ -143,10 +145,18 @@ function ContextSync:menu()
         {
             text_func = function()
                 local s = self:settings()
-                return (s.token and s.token ~= "") and _("Device token: set") or _("Device token: not set")
+                return T(_("Username: %1"), (s.username and s.username ~= "") and s.username or _("not set"))
             end,
             keep_menu_open = true,
-            callback = function() self:editSetting("token", _("Device token"), _("paste the token from the web app")) end,
+            callback = function() self:editSetting("username", _("Username"), _("your Context Creator account username")) end,
+        },
+        {
+            text_func = function()
+                local s = self:settings()
+                return (s.password and s.password ~= "") and _("Password: set") or _("Password: not set")
+            end,
+            keep_menu_open = true,
+            callback = function() self:editSetting("password", _("Password"), _("your Context Creator account password")) end,
         },
         {
             text = _("Sync now"),

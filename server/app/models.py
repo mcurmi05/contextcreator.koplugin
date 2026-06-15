@@ -12,13 +12,6 @@ class User(SQLModel, table=True):
     password_hash: str
     created: datetime = Field(default_factory=_now)
 
-class Device(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id", index=True)
-    name: str = "device"
-    token_hash: str = Field(index=True, unique=True)
-    created: datetime = Field(default_factory=_now)
-
 class Book(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("user_id", "book_id", name="uq_user_book"),)
     id: int | None = Field(default=None, primary_key=True)

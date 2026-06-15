@@ -41,13 +41,8 @@
     <ul id="books"></ul>
     <p id="books-empty" class="muted hidden">No books synced yet.</p>
 
-    <h2>Device sync token</h2>
-    <p class="muted">Generate a token to paste into the KOReader plugin. Shown once.</p>
-    <div class="row">
-      <input id="device-name" placeholder="device name (e.g. Kobo)">
-      <button id="device-btn">Generate</button>
-    </div>
-    <p id="device-token"></p>
+    <p class="muted">To sync from KOReader, open Context Creator &rarr; Sync and enter this server's
+    address plus your account username and password.</p>
   </div>
 
 <script>
@@ -94,12 +89,6 @@ $("login-btn").onclick = async () => {
   } catch (e) { $("login-error").textContent = e.message; }
 };
 $("logout-btn").onclick = async () => { await api("/api/auth/logout", { method: "POST" }); await refresh(); };
-$("device-btn").onclick = async () => {
-  try {
-    const d = await api("/api/devices", { method: "POST", body: JSON.stringify({ name: $("device-name").value }) });
-    $("device-token").innerHTML = `Token for <strong>${d.name}</strong>: <code>${d.token}</code>`;
-  } catch (e) { $("device-token").textContent = e.message; }
-};
 refresh();
 </script>
 </body>
