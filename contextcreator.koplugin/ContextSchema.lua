@@ -35,9 +35,28 @@ local TYPE_LABELS = {
     concept = "Concept",
 }
 
---human label for a node type, shown in the lists (unset/unknown stays blank so it doesn't clutter)
+--human label for a node type, shown in the lists. built-ins get their nice label, a custom type
+--displays under its own name, and unset/empty stays blank so it doesn't clutter
 function ContextSchema.typeLabel(t)
-    return TYPE_LABELS[t] or ""
+    if not t or t == "" or t == "unset" then return "" end
+    return TYPE_LABELS[t] or t
+end
+
+--a custom type is any non-empty type that isn't unset and isn't one of the built-ins
+function ContextSchema.isCustomType(t)
+    return t ~= nil and t ~= "" and t ~= "unset" and TYPE_LABELS[t] == nil
+end
+
+--turn a user-typed type name into a stored type. if it matches a built-in (by key or label,
+--case-insensitively) it folds into that built-in, otherwise it's kept verbatim as a custom type
+function ContextSchema.resolveType(name)
+    name = (name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then return "unset" end
+    local lower = name:lower()
+    for key, label in pairs(TYPE_LABELS) do
+        if key == lower or label:lower() == lower then return key end
+    end
+    return name
 end
 
 --epoch seconds, stamped on every entity edit so last-write-wins merge has something to compare

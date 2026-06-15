@@ -40,15 +40,105 @@ end
 
 --a Menu that doesn't flash or select its section-header rows (items with _header set).
 --Menu rebuilds the row widgets on every page change, so we re-neutralise the headers each time.
+--when headers_holdable is set, custom-type headers keep their long-press (so they can be renamed).
 local SectionedMenu = Menu:extend{}
 function SectionedMenu:updateItems(select_number, no_recalculate_dimen)
     Menu.updateItems(self, select_number, no_recalculate_dimen)
     for _, row in ipairs(self.item_group) do
-        if row.entry and row.entry._header then
+        local e = row.entry
+        if e and e._header then
             row.onTapSelect = function() return true end  --consume the tap, no invert flash, no callback
-            row.onHoldSelect = function() return true end
+            if not (self.headers_holdable and e._custom_type) then
+                row.onHoldSelect = function() return true end
+            end
         end
     end
+end
+
+--section headers for the built-in types, in display order. custom-type sections are appended after
+--these (alphabetically) and "No type" goes last, all built in groupedContextItems below.
+local BUILTIN_SECTIONS = {
+    { type = "character", header = _("Characters") },
+    { type = "place",     header = _("Locations") },
+    { type = "object",    header = _("Objects") },
+    { type = "concept",   header = _("Concepts") },
+}
+
+--build the flat item list for a contexts menu, grouped under bold section headers.
+--exclude_key drops one node (used by the link picker to hide the node being linked from).
+--show_counts appends "(N dot points)" to each row. custom-type headers carry _custom_type so the
+--caller can offer to rename them.
+local function groupedContextItems(doc, exclude_key, show_counts)
+    --bucket nodes by type
+    local buckets = {}
+    for key, node in pairs(doc.nodes) do
+        if key ~= exclude_key then
+            local t = (node.type == nil or node.type == "") and "unset" or node.type
+            buckets[t] = buckets[t] or {}
+            table.insert(buckets[t], { key = key, title = node.title, n = #node.points })
+        end
+    end
+
+    --section order: built-ins, then custom types (alphabetical), then "No type"
+    local sections = {}
+    for i = 1, #BUILTIN_SECTIONS do
+        sections[#sections + 1] = BUILTIN_SECTIONS[i]
+    end
+    local customs = {}
+    for t in pairs(buckets) do
+        if ContextSchema.isCustomType(t) then customs[#customs + 1] = t end
+    end
+    table.sort(customs, function(a, b) return a:lower() < b:lower() end)
+    for i = 1, #customs do
+        sections[#sections + 1] = {
+            type = customs[i],
+            header = T(_("%1 (custom)"), ContextSchema.typeLabel(customs[i])),
+            custom = customs[i],
+        }
+    end
+    sections[#sections + 1] = { type = "unset", header = _("No type") }
+
+    local items = {}
+    for si = 1, #sections do
+        local section = sections[si]
+        local list = buckets[section.type]
+        if list and #list > 0 then
+            table.sort(list, function(a, b) return a.title:lower() < b.title:lower() end)
+            table.insert(items, { text = section.header, bold = true, _header = true, _custom_type = section.custom })
+            for ni = 1, #list do
+                local entry = list[ni]
+                table.insert(items, {
+                    text = show_counts and T("%1  (%2)", entry.title, pointsLabel(entry.n)) or entry.title,
+                    _key = entry.key,
+                    _title = entry.title,
+                })
+            end
+        end
+    end
+    return items
+end
+
+--the type choices for the pickers: the built-ins, plus any custom types already used in this book
+local function typeOptions(doc)
+    local opts = {}
+    for i = 1, #ContextSchema.NODE_TYPES do
+        local t = ContextSchema.NODE_TYPES[i]
+        if t ~= "unset" and not ContextSchema.isCustomType(t) then
+            opts[#opts + 1] = { label = ContextSchema.typeLabel(t), type = t }
+        end
+    end
+    local seen, customs = {}, {}
+    for _key, node in pairs(doc.nodes) do
+        if ContextSchema.isCustomType(node.type) and not seen[node.type] then
+            seen[node.type] = true
+            customs[#customs + 1] = node.type
+        end
+    end
+    table.sort(customs, function(a, b) return a:lower() < b:lower() end)
+    for i = 1, #customs do
+        opts[#opts + 1] = { label = T(_("%1 (custom)"), customs[i]), type = customs[i] }
+    end
+    return opts
 end
 
 local ContextView = {}
@@ -90,15 +180,17 @@ function ContextView:findSimilarNodes(doc, word)
     return matches
 end
 
---resolve a highlighted word to a node, then show its dot points.
---an exact (normalized) match opens straight away; fuzzy look-alikes go through the chooser to confirm.
+--resolve a highlighted word to a node, then start adding a dot point to it.
+--an exact (normalized) match goes straight to a new dot point; fuzzy look-alikes go through the chooser.
 function ContextView:showEntryEditor(word)
     local key = ContextText.normalizeWord(word)
     if key == "" then return end
 
     local doc = self.store:load()
-    if doc.nodes[key] then
-        self:openContext(key)
+    local node = doc.nodes[key]
+    if node then
+        --exact match: add a point to it, with the option to redirect to a different context
+        self:editPoint(key, node.title, nil, nil, true)
         return
     end
 
@@ -120,12 +212,12 @@ function ContextView:showSimilarChooser(word, similar)
             text = T(_("Add to \u{201C}%1\u{201D}"), m.title),
             callback = function()
                 UIManager:close(dialog)
-                self:editPoint(m.key, m.title, nil) -- existing context, jump straight to a new dot point
+                self:editPoint(m.key, m.title, nil, nil, true) -- existing context, jump to a new dot point (redirectable)
             end,
         }})
     end
     table.insert(buttons, {{
-        text = T(_("No, create \u{201C}%1\u{201D}"), ContextText.trim(word)),
+        text = _("Create new context instead"),
         callback = function()
             UIManager:close(dialog)
             self:createNewContext(ContextText.trim(word))
@@ -169,7 +261,7 @@ function ContextView:createNewContext(name)
                 local doc = self.store:load()
                 local existing = doc.nodes[key]
                 if existing then
-                    self:editPoint(key, existing.title, nil)
+                    self:editPoint(key, existing.title, nil, nil, true)
                 else
                     self:chooseTypeForNewContext(key, title)
                 end
@@ -224,7 +316,7 @@ function ContextView:showExistingContextPicker()
         is_popout = false,
         onMenuSelect = function(_self, item)
             UIManager:close(menu)
-            self:editPoint(item._key, item._title, nil)
+            self:editPoint(item._key, item._title, nil, nil, true)
         end,
         close_callback = function() UIManager:close(menu) end,
     }
@@ -233,43 +325,49 @@ end
 
 --brand new context setup, step 2: pick a type, then drop into the first dot point
 function ContextView:chooseTypeForNewContext(key, title)
+    local doc = self.store:load()
     local dialog
-    --apply the chosen type then go to the first dot point. a real type is saved up front so the
+    --apply the chosen type then go to the first dot point. a real/custom type is saved up front so the
     --context sticks even before a point is added; unset is left unsaved (the node gets created when
     --the first point lands, or when "Skip for now" is tapped on the dot point page)
     local function pickType(t)
-        UIManager:close(dialog)
         if t ~= "unset" then
-            local doc = self.store:load()
-            if not doc.nodes[key] then
-                doc.nodes[key] = { title = title, type = t, points = {}, updated = ContextSchema.now() }
-                self.store:save(doc)
+            local d = self.store:load()
+            if not d.nodes[key] then
+                d.nodes[key] = { title = title, type = t, points = {}, updated = ContextSchema.now() }
+                self.store:save(d)
             end
         end
         self:editPoint(key, title, nil, true) -- allow "Skip for now" on the first point
     end
 
     local buttons = {}
-    for i = 1, #ContextSchema.NODE_TYPES do
-        local t = ContextSchema.NODE_TYPES[i]
-        if t ~= "unset" then
-            table.insert(buttons, {{
-                text = ContextSchema.typeLabel(t),
-                callback = function() pickType(t) end,
-            }})
-        end
+    local opts = typeOptions(doc)
+    for i = 1, #opts do
+        local o = opts[i]
+        buttons[#buttons + 1] = {{
+            text = o.label,
+            callback = function() UIManager:close(dialog); pickType(o.type) end,
+        }}
     end
+    buttons[#buttons + 1] = {{
+        text = _("Custom type\u{2026}"),
+        callback = function()
+            UIManager:close(dialog)
+            self:promptCustomType(pickType)
+        end,
+    }}
     --cancel and "Skip for now" (no type yet) share the bottom row, cancel on the left
-    table.insert(buttons, {
+    buttons[#buttons + 1] = {
         {
             text = _("Cancel"),
             callback = function() UIManager:close(dialog) end,
         },
         {
             text = _("Skip for now"),
-            callback = function() pickType("unset") end,
+            callback = function() UIManager:close(dialog); pickType("unset") end,
         },
-    })
+    }
 
     dialog = ButtonDialog:new{
         title = T(_("What type of context is \u{201C}%1\u{201D}?"), title),
@@ -393,8 +491,10 @@ end
 --title is the nodes display name, needed when the node does not exist on disk yet.
 --allow_skip adds a "Skip for now" button (only used while creating a brand new context) so the
 --user can initialise the context without writing a point yet.
+--allow_redirect adds an "Add dot point to different context instead" button (used when we landed
+--here from "Add to context") so the user can send the point to another context.
 --newlines stay inside the one point, a new point is only made via "Add dot point".
-function ContextView:editPoint(key, title, index, allow_skip)
+function ContextView:editPoint(key, title, index, allow_skip, allow_redirect)
     local doc = self.store:load()
     local node = doc.nodes[key]
     local points = node and node.points or {}
@@ -460,6 +560,16 @@ function ContextView:editPoint(key, title, index, allow_skip)
             end,
         }})
     end
+    --when we got here from "Add to context", let the user redirect the point to another context
+    if index == nil and allow_redirect then
+        table.insert(rows, {{
+            text = _("Add dot point to different context instead"),
+            callback = function()
+                UIManager:close(dialog)
+                self:showExistingContextPicker()
+            end,
+        }})
+    end
 
     dialog = InputDialog:new{
         title = index and T(_("Edit dot point for \u{201C}%1\u{201D} context"), title) or T(_("New dot point for \u{201C}%1\u{201D} context"), title),
@@ -486,59 +596,23 @@ end
 
 --viewing contexts for a book
 
---section order for the grouped list: the real types first, then "No type" last.
---each entry maps a node type to its bold section header
-local CONTEXT_SECTIONS = {
-    { type = "character", header = _("Characters") },
-    { type = "place",     header = _("Locations") },
-    { type = "object",    header = _("Objects") },
-    { type = "concept",   header = _("Concepts") },
-    { type = "unset",     header = _("No type") },
-}
-
 function ContextView:showAllContexts()
     local doc = self.store:load()
 
-    --bucket the nodes by type so each can go under its own section
-    local buckets = {}
-    local total = 0
-    for key, node in pairs(doc.nodes) do
-        local t = (node.type == nil or node.type == "") and "unset" or node.type
-        buckets[t] = buckets[t] or {}
-        table.insert(buckets[t], { key = key, title = node.title, n = #node.points })
-        total = total + 1
-    end
-
-    if total == 0 then
+    if next(doc.nodes) == nil then
         UIManager:show(InfoMessage:new{
             text = _("No context entries for this book yet.\n\nLong-press a word while reading and tap \"Add to context\" to start."),
         })
         return
     end
 
-    --build the flat item list: a bold header per non-empty section, then its nodes sorted by name
-    local items = {}
-    for si = 1, #CONTEXT_SECTIONS do
-        local section = CONTEXT_SECTIONS[si]
-        local list = buckets[section.type]
-        if list and #list > 0 then
-            table.sort(list, function(a, b) return a.title:lower() < b.title:lower() end)
-            table.insert(items, { text = section.header, bold = true, _header = true })
-            for ni = 1, #list do
-                local entry = list[ni]
-                table.insert(items, {
-                    text = T("%1  (%2)", entry.title, pointsLabel(entry.n)),
-                    _key = entry.key,
-                    _title = entry.title,
-                })
-            end
-        end
-    end
+    local items = groupedContextItems(doc, nil, true)
 
     local menu
     menu = SectionedMenu:new{
         title = T(_("Contexts: %1"), self.store:getBookTitle()),
         item_table = items,
+        headers_holdable = true, --custom-type headers can be long-pressed to rename
         width = Screen:getWidth() - 2 * WINDOW_MARGIN,
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false, --keep the border but drop Menus rounded corners
@@ -548,7 +622,10 @@ function ContextView:showAllContexts()
             self:openContext(item._key)
         end,
         onMenuHold = function(_self, item)
-            if item._header then return true end
+            if item._header then
+                if item._custom_type then self:renameCustomType(item._custom_type, menu) end
+                return true
+            end
             self:showNodeActions(menu, item._key)
             return true
         end,
@@ -566,6 +643,76 @@ function ContextView:showAllContexts()
     end
 
     UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
+end
+
+--rename a custom type (reached by long-pressing its section header). retypes every context using
+--it to the new name, folding into a built-in if the new name matches one.
+function ContextView:renameCustomType(old_type, menu)
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Rename context type"),
+        input = old_type,
+        buttons = {{
+            {
+                text = _("Cancel"),
+                id = "close",
+                callback = function() UIManager:close(dialog) end,
+            },
+            {
+                text = _("Save"),
+                is_enter_default = true,
+                callback = function()
+                    local name = ContextText.trim(dialog:getInputText())
+                    UIManager:close(dialog)
+                    if name == "" then return end
+                    local new_type = ContextSchema.resolveType(name)
+                    if new_type == old_type then return end
+                    local doc = self.store:load()
+                    local stamp = ContextSchema.now()
+                    for _key, node in pairs(doc.nodes) do
+                        if node.type == old_type then
+                            node.type = new_type
+                            node.updated = stamp
+                        end
+                    end
+                    self.store:save(doc)
+                    if menu then UIManager:close(menu) end
+                    self:showAllContexts()
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+--ask for a custom type name, then hand the resolved type to the callback
+function ContextView:promptCustomType(callback)
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Custom context type"),
+        input = "",
+        input_hint = _("e.g. faction, event, theme\u{2026}"),
+        buttons = {{
+            {
+                text = _("Cancel"),
+                id = "close",
+                callback = function() UIManager:close(dialog) end,
+            },
+            {
+                text = _("Set type"),
+                is_enter_default = true,
+                callback = function()
+                    local name = ContextText.trim(dialog:getInputText())
+                    UIManager:close(dialog)
+                    if name == "" then return end
+                    callback(ContextSchema.resolveType(name))
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
 end
 
 --long press a node: set its type, link it to another node, view its relationships, rename or delete
@@ -628,35 +775,43 @@ function ContextView:showNodeActions(menu, key)
     UIManager:show(dialog)
 end
 
---pick the node's type (character / place / object / concept / unset)
+--pick the node's type: built-ins, any existing custom types, a "Custom type..." option, or unset
 function ContextView:setNodeType(menu, key)
+    local doc = self.store:load()
+    local node = doc.nodes[key]
+    local is_unset = not node or node.type == nil or node.type == "" or node.type == "unset"
+
     local dialog
-    local function applyType(t)
-        UIManager:close(dialog)
-        local doc = self.store:load()
-        local node = doc.nodes[key]
-        if node then
-            node.type = t
-            node.updated = ContextSchema.now()
-            self.store:save(doc)
+    --apply the type and go back to the list. kept out of the button handlers so the custom-type
+    --path (which closes the dialog itself before prompting) can reuse it
+    local function setType(t)
+        local d = self.store:load()
+        local n = d.nodes[key]
+        if n then
+            n.type = t
+            n.updated = ContextSchema.now()
+            self.store:save(d)
         end
         UIManager:close(menu)
         self:showAllContexts()
     end
 
-    local node = self.store:load().nodes[key]
-    local is_unset = not node or node.type == nil or node.type == "" or node.type == "unset"
-
     local buttons = {}
-    for i = 1, #ContextSchema.NODE_TYPES do
-        local t = ContextSchema.NODE_TYPES[i]
-        if t ~= "unset" then
-            table.insert(buttons, {{
-                text = ContextSchema.typeLabel(t),
-                callback = function() applyType(t) end,
-            }})
-        end
+    local opts = typeOptions(doc)
+    for i = 1, #opts do
+        local o = opts[i]
+        buttons[#buttons + 1] = {{
+            text = o.label,
+            callback = function() UIManager:close(dialog); setType(o.type) end,
+        }}
     end
+    buttons[#buttons + 1] = {{
+        text = _("Custom type\u{2026}"),
+        callback = function()
+            UIManager:close(dialog)
+            self:promptCustomType(setType)
+        end,
+    }}
     --bottom row: cancel, plus "Unset type" only when there's actually a type to clear
     local bottom = {{
         text = _("Cancel"),
@@ -665,10 +820,10 @@ function ContextView:setNodeType(menu, key)
     if not is_unset then
         table.insert(bottom, {
             text = _("Unset type"),
-            callback = function() applyType("unset") end,
+            callback = function() UIManager:close(dialog); setType("unset") end,
         })
     end
-    table.insert(buttons, bottom)
+    buttons[#buttons + 1] = bottom
 
     dialog = ButtonDialog:new{
         title = _("What type of context is this?"),
@@ -740,15 +895,11 @@ end
 
 --relationships
 
---pick another node to link this one to, then ask for the relationship's label
+--pick another node to link this one to, then ask for the relationship's label.
+--grouped by type like the all-contexts list, with the node we're linking from left out.
 function ContextView:showLinkPicker(menu, from_key)
     local doc = self.store:load()
-    local items = {}
-    for key, node in pairs(doc.nodes) do
-        if key ~= from_key then
-            table.insert(items, { text = node.title, _key = key })
-        end
-    end
+    local items = groupedContextItems(doc, from_key, false)
 
     if #items == 0 then
         UIManager:show(InfoMessage:new{
@@ -757,18 +908,20 @@ function ContextView:showLinkPicker(menu, from_key)
         return
     end
 
-    table.sort(items, function(a, b) return a.text:lower() < b.text:lower() end)
-
     local picker
-    picker = Menu:new{
+    picker = SectionedMenu:new{
         title = T(_("Link \u{201C}%1\u{201D} to\u{2026}"), ContextSchema.titleForKey(doc, from_key)),
         item_table = items,
         width = Screen:getWidth() - 2 * WINDOW_MARGIN,
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false,
         onMenuSelect = function(_self, item)
+            if item._header then return end --section headers aren't tappable
             UIManager:close(picker)
             self:editRelationshipLabel(menu, from_key, item._key)
+        end,
+        onMenuHold = function(_self, item)
+            return true --no per-node action here
         end,
         close_callback = function() UIManager:close(picker) end,
     }
