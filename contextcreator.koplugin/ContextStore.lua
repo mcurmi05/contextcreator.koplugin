@@ -180,11 +180,13 @@ function ContextStore:load()
 end
 
 --write the document for the current book. file-level updated is bumped so a future sync can
---cheaply tell something changed. an entirely empty doc (no contexts/relationships/tombstones) is removed
+--cheaply tell something changed. an entirely empty doc (no contexts/relationships/tombstones) is removed.
+--fires on_change afterwards (unless suppressed) so the sync layer can schedule a push.
 function ContextStore:save(doc)
     local path = self:getBookFilePath()
     if ContextSchema.isEmpty(doc) then
         os.remove(path)
+        if self.on_change and not self._suppress then self.on_change() end
         return
     end
     doc.updated = ContextSchema.now()
@@ -212,6 +214,15 @@ function ContextStore:save(doc)
     end
     fw:write(encoded)
     fw:close()
+    if self.on_change and not self._suppress then self.on_change() end
+end
+
+--write a full document verbatim (e.g. one adopted from a sync merge), WITHOUT firing on_change,
+--so adopting the server's result doesn't loop back into another sync.
+function ContextStore:replace(doc)
+    self._suppress = true
+    self:save(doc)
+    self._suppress = false
 end
 
 return ContextStore

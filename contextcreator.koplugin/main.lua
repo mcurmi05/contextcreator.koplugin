@@ -1,16 +1,19 @@
 --[[
 wires KOReaders hooks (highlight popup, reader menu, dispatcher action) to the UI, plugin split across sibling modules:
   ContextText   - pure text normalization + fuzzy matching
-  ContextSchema - the v2 data model, migration, and pure operations on a document
+  ContextSchema - the data model and pure operations on a document
   ContextStore  - per book file persistence (load/save)
   ContextView   - all the menus and dialogs
+  ContextSync   - seamless device <-> server sync (+ ContextSyncClient http)
 ]]
 
 local Dispatcher = require("dispatcher")
+local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
 local ContextStore = require("ContextStore")
 local ContextView = require("ContextView")
+local ContextSync = require("ContextSync")
 
 local ContextCreator = WidgetContainer:extend{
     name = "contextcreator",
@@ -36,6 +39,14 @@ function ContextCreator:init()
     --storage + UI for the currently open book
     self.store = ContextStore:new(self.ui)
     self.view = ContextView:new(self.store)
+
+    --seamless sync: push (debounced) after any change, pull on open, flush on close
+    self.sync = ContextSync:new(self.store)
+    self.store.on_change = function() self.sync:scheduleSync() end
+    if self.sync:isConfigured() then
+        --pull server changes shortly after the book opens (don't block the open)
+        UIManager:scheduleIn(1, function() self.sync:syncNow() end)
+    end
 
     --add buttons to the long press/highlight popup
     if self.ui.highlight then
@@ -69,7 +80,16 @@ function ContextCreator:addToMainMenu(menu_items)
     menu_items.contextcreator = {
         text = _("Context Creator"),
         sorting_hint = "navi", --first/navigation tab
-        callback = function() self.view:showAllContexts() end,
+        sub_item_table = {
+            {
+                text = _("View all contexts"),
+                callback = function() self.view:showAllContexts() end,
+            },
+            {
+                text = _("Sync"),
+                sub_item_table_func = function() return self.sync:menu() end,
+            },
+        },
     }
 end
 
@@ -77,6 +97,11 @@ end
 function ContextCreator:onShowContextCreator()
     self.view:showAllContexts()
     return true
+end
+
+--flush any pending sync when the book closes so changes don't wait for next open
+function ContextCreator:onCloseDocument()
+    if self.sync then self.sync:flush() end
 end
 
 return ContextCreator

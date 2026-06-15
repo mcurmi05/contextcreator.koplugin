@@ -490,6 +490,7 @@ function ContextView:showPointActions(menu, key, index)
             local d = self.store:load()
             local n = d.contexts[key]
             if n then
+                ContextSchema.tombstonePoint(d, n.points[index]) -- so the delete survives a sync
                 table.remove(n.points, index)
                 n.updated = ContextSchema.now()
                 self.store:save(d)
@@ -574,18 +575,25 @@ function ContextView:editPoint(key, title, index, allow_skip, allow_redirect, po
             callback = function()
                 local text = ContextText.trim(dialog:getInputText())
                 if text == "" then
-                    if index then table.remove(points, index) end -- emptied -> delete it
+                    if index then
+                        ContextSchema.tombstonePoint(doc, points[index]) -- emptied -> delete it (for sync)
+                        table.remove(points, index)
+                    end
                 elseif index then
-                    --edit in place, keeping the point's existing location
-                    local p = points[index]
-                    if type(p) == "table" then p.text = text else points[index] = { text = text } end
+                    --editing text mints a NEW point id (and tombstones the old) so concurrent edits on two
+                    --devices duplicate instead of clobbering. keep the old point's location.
+                    local old = points[index]
+                    local p = ContextSchema.newPoint(text, {
+                        pos = ContextSchema.pointPos(old),
+                        progress = type(old) == "table" and old.progress or nil,
+                        chapter = type(old) == "table" and old.chapter or nil,
+                    })
+                    ContextSchema.tombstonePoint(doc, old)
+                    points[index] = p
                 else
                     --new point, anchored to where it was noted (for jump-back + the timeline)
                     local a = getAnchor()
-                    local p = { text = text }
-                    if a.pos ~= nil then p.pos = a.pos end
-                    if a.progress then p.progress = a.progress end
-                    if a.chapter then p.chapter = a.chapter end
+                    local p = ContextSchema.newPoint(text, a)
                     table.insert(points, p)
                 end
                 persist()
@@ -1176,8 +1184,9 @@ function ContextView:showRelationshipActions(menu, rel_id, list_key)
                 callback = function()
                     UIManager:close(dialog)
                     local d = self.store:load()
-                    local _, idx = ContextSchema.findRel(d, rel_id)
+                    local rel, idx = ContextSchema.findRel(d, rel_id)
                     if idx then
+                        for _, p in ipairs(rel.points) do ContextSchema.tombstonePoint(d, p) end
                         d.tombstones.relationships[rel_id] = ContextSchema.now()
                         table.remove(d.relationships, idx)
                         self.store:save(d)
@@ -1263,12 +1272,17 @@ function ContextView:editRelPoint(rel_id, index)
                 callback = function()
                     local text = ContextText.trim(dialog:getInputText())
                     if text == "" then
-                        if index then table.remove(rel.points, index) end
+                        if index then
+                            ContextSchema.tombstonePoint(doc, rel.points[index])
+                            table.remove(rel.points, index)
+                        end
                     elseif index then
-                        local p = rel.points[index]
-                        if type(p) == "table" then p.text = text else rel.points[index] = { text = text } end
+                        --editing text mints a new id + tombstones the old (additive sync), same as node points
+                        local old = rel.points[index]
+                        ContextSchema.tombstonePoint(doc, old)
+                        rel.points[index] = ContextSchema.newPoint(text)
                     else
-                        table.insert(rel.points, { text = text })
+                        table.insert(rel.points, ContextSchema.newPoint(text))
                     end
                     rel.updated = ContextSchema.now()
                     self.store:save(doc)
@@ -1296,6 +1310,7 @@ function ContextView:showRelPointActions(menu, rel_id, index)
                     local doc = self.store:load()
                     local rel = ContextSchema.findRel(doc, rel_id)
                     if rel then
+                        ContextSchema.tombstonePoint(doc, rel.points[index]) -- so the delete survives a sync
                         table.remove(rel.points, index)
                         rel.updated = ContextSchema.now()
                         self.store:save(doc)

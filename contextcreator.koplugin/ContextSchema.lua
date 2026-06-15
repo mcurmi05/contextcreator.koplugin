@@ -11,12 +11,14 @@ doc shape:
     book = { id, title, authors, toc = { { title, progress }, ... } },  -- toc: chapter bands for the webapp timeline
     updated = <epoch>,                                  -- file-level last change, for cheap sync checks
     contexts = { [key] = { title, type, points, updated, progress, chapter } },  -- key = normalizeWord(title)
-    -- a point is { text = "...", pos, progress, chapter }. pos is where in the book it was noted (a CRE
-    -- xpointer string / a { page = N } table) for on-device jump-back. progress is a 0..1 fraction through
-    -- the book = the universal, file-independent timeline axis the webapp scrubs. chapter is the TOC title
-    -- there. context-level progress/chapter anchor a context that has no located points. any may be nil.
+    -- a point is { id, text, pos, progress, chapter }. id is a stable per-point id so the additive sync
+    -- merge can union points by id (editing text mints a NEW id + tombstones the old, so concurrent edits
+    -- duplicate instead of clobbering). pos is where in the book it was noted (a CRE xpointer string / a
+    -- { page = N } table) for on-device jump-back. progress is a 0..1 fraction through the book = the
+    -- universal timeline axis the webapp scrubs. chapter is the TOC title there. any of pos/progress/chapter
+    -- may be nil. context-level progress/chapter anchor a context that has no located points.
     relationships = { { id, from, to, label, directed, points, updated }, ... },  -- directed=false means no arrow; missing means directed (made before undirected existed)
-    tombstones = { contexts = { [key] = <epoch> }, relationships = { [id] = <epoch> } },
+    tombstones = { contexts = { [key] = <epoch> }, relationships = { [id] = <epoch> }, points = { [id] = <epoch> } },
   }
 ]]
 
@@ -78,7 +80,7 @@ function ContextSchema.newDoc()
         updated = ContextSchema.now(),
         contexts = {},
         relationships = {},
-        tombstones = { contexts = {}, relationships = {} },
+        tombstones = { contexts = {}, relationships = {}, points = {} },
     }
 end
 
@@ -88,6 +90,7 @@ function ContextSchema.isEmpty(doc)
     if #doc.relationships > 0 then return false end
     if next(doc.tombstones.contexts) ~= nil then return false end
     if next(doc.tombstones.relationships) ~= nil then return false end
+    if next(doc.tombstones.points) ~= nil then return false end
     return true
 end
 
@@ -99,6 +102,7 @@ function ContextSchema.normalize(doc)
     doc.tombstones = doc.tombstones or {}
     doc.tombstones.contexts = doc.tombstones.contexts or {}
     doc.tombstones.relationships = doc.tombstones.relationships or {}
+    doc.tombstones.points = doc.tombstones.points or {}
     doc.book = doc.book or {}
     return doc
 end
@@ -115,6 +119,37 @@ function ContextSchema.pointPos(p)
     return nil
 end
 
+--a point's stable id (nil for legacy bare-string points)
+function ContextSchema.pointId(p)
+    if type(p) == "table" then return p.id end
+    return nil
+end
+
+--build a new dot point with a fresh id. anchor (optional) carries { pos, progress, chapter }.
+function ContextSchema.newPoint(text, anchor)
+    anchor = anchor or {}
+    return {
+        id = ContextSchema.genId(),
+        text = text,
+        pos = anchor.pos,
+        progress = anchor.progress,
+        chapter = anchor.chapter,
+    }
+end
+
+--record a point's deletion so the additive sync merge won't resurrect it from another device
+function ContextSchema.tombstonePoint(doc, point)
+    local id = ContextSchema.pointId(point)
+    if id then doc.tombstones.points[id] = ContextSchema.now() end
+end
+
+--tombstone all of a point list's ids (used when a whole context/relationship is deleted)
+local function tombstonePoints(doc, points)
+    for _, p in ipairs(points or {}) do
+        ContextSchema.tombstonePoint(doc, p)
+    end
+end
+
 --display title for a context key, falling back to the key itself if the context is gone (defensive)
 function ContextSchema.titleForKey(doc, key)
     local context = doc.contexts[key]
@@ -129,16 +164,19 @@ function ContextSchema.findRel(doc, id)
     return nil
 end
 
---remove a context and every relationship that touches it, recording tombstones so the deletes
---survive a future sync (last-write-wins won't resurrect them)
+--remove a context and every relationship that touches it, recording tombstones (for the context key,
+--its points, and the relationships + their points) so the additive sync merge won't resurrect them
 function ContextSchema.deleteNode(doc, key)
-    if doc.contexts[key] then
+    local node = doc.contexts[key]
+    if node then
+        tombstonePoints(doc, node.points)
         doc.contexts[key] = nil
         doc.tombstones.contexts[key] = ContextSchema.now()
     end
     for i = #doc.relationships, 1, -1 do
         local rel = doc.relationships[i]
         if rel.from == key or rel.to == key then
+            tombstonePoints(doc, rel.points)
             doc.tombstones.relationships[rel.id] = ContextSchema.now()
             table.remove(doc.relationships, i)
         end
