@@ -4,3 +4,4 @@ __pycache__/
 .env
 secret_key
 .venv/
+app/web/
