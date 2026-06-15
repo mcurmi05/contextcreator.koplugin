@@ -26,6 +26,31 @@ local BULLET = "\u{2022} "
 --margin kept around the context windows so the book stays visible behind them
 local WINDOW_MARGIN = Screen:scaleBySize(80)
 
+--glyph between the two ends of a relationship, a one way arrow when directed, a two way one when not.
+--missing directed field means it was made before undirected existed, treat those as directed
+local function relArrow(rel)
+    return rel.directed == false and "\u{2194}" or "\u{2192}"
+end
+
+--"3 dot points" / "1 dot point", for the count shown next to a context name
+local function pointsLabel(n)
+    if n == 1 then return _("1 dot point") end
+    return T(_("%1 dot points"), n)
+end
+
+--a Menu that doesn't flash or select its section-header rows (items with _header set).
+--Menu rebuilds the row widgets on every page change, so we re-neutralise the headers each time.
+local SectionedMenu = Menu:extend{}
+function SectionedMenu:updateItems(select_number, no_recalculate_dimen)
+    Menu.updateItems(self, select_number, no_recalculate_dimen)
+    for _, row in ipairs(self.item_group) do
+        if row.entry and row.entry._header then
+            row.onTapSelect = function() return true end  --consume the tap, no invert flash, no callback
+            row.onHoldSelect = function() return true end
+        end
+    end
+end
+
 local ContextView = {}
 ContextView.__index = ContextView
 
@@ -209,34 +234,45 @@ end
 --brand new context setup, step 2: pick a type, then drop into the first dot point
 function ContextView:chooseTypeForNewContext(key, title)
     local dialog
+    --apply the chosen type then go to the first dot point. a real type is saved up front so the
+    --context sticks even before a point is added; unset is left unsaved (the node gets created when
+    --the first point lands, or when "Skip for now" is tapped on the dot point page)
+    local function pickType(t)
+        UIManager:close(dialog)
+        if t ~= "unset" then
+            local doc = self.store:load()
+            if not doc.nodes[key] then
+                doc.nodes[key] = { title = title, type = t, points = {}, updated = ContextSchema.now() }
+                self.store:save(doc)
+            end
+        end
+        self:editPoint(key, title, nil, true) -- allow "Skip for now" on the first point
+    end
+
     local buttons = {}
     for i = 1, #ContextSchema.NODE_TYPES do
         local t = ContextSchema.NODE_TYPES[i]
-        table.insert(buttons, {{
-            text = t == "unset" and _("Skip for now") or ContextSchema.typeLabel(t),
-            callback = function()
-                UIManager:close(dialog)
-                --save the typed node up front so it sticks even before a point is added.
-                --an unset node is left unsaved, it gets created when the first point lands
-                --(and stays prune-able if the user backs out without adding anything)
-                if t ~= "unset" then
-                    local doc = self.store:load()
-                    if not doc.nodes[key] then
-                        doc.nodes[key] = { title = title, type = t, points = {}, updated = ContextSchema.now() }
-                        self.store:save(doc)
-                    end
-                end
-                self:editPoint(key, title, nil, true) -- allow "Skip for now" on the first point
-            end,
-        }})
+        if t ~= "unset" then
+            table.insert(buttons, {{
+                text = ContextSchema.typeLabel(t),
+                callback = function() pickType(t) end,
+            }})
+        end
     end
-    table.insert(buttons, {{
-        text = _("Cancel"),
-        callback = function() UIManager:close(dialog) end,
-    }})
+    --cancel and "Skip for now" (no type yet) share the bottom row, cancel on the left
+    table.insert(buttons, {
+        {
+            text = _("Cancel"),
+            callback = function() UIManager:close(dialog) end,
+        },
+        {
+            text = _("Skip for now"),
+            callback = function() pickType("unset") end,
+        },
+    })
 
     dialog = ButtonDialog:new{
-        title = T(_("What kind of thing is \u{201C}%1\u{201D}?"), title),
+        title = T(_("What type of context is \u{201C}%1\u{201D}?"), title),
         title_align = "center",
         buttons = buttons,
     }
@@ -281,7 +317,8 @@ function ContextView:showPointsList(key)
     end
 
     local label = ContextSchema.typeLabel(node.type)
-    local title = label ~= "" and T(_("%1  \u{00B7} %2"), node.title, label) or node.title
+    local bracket = label ~= "" and T(_("(%1 context)"), label) or _("(Unset context type)")
+    local title = T(_("%1  \u{00B7} %2"), node.title, bracket)
 
     local menu
     menu = Menu:new{
@@ -303,10 +340,15 @@ function ContextView:showPointsList(key)
         end,
     }
 
-    --flank the bottom page-navigation bar: "All contexts" on its left, "Add dot point" on its right
+    --flank the bottom page-navigation bar: "All contexts" on the left, then this context's
+    --relationships and "Add dot point" on the right
     self:addFooterButton(menu, "left", T(_("\u{2190} All contexts for %1"), self.store:getBookTitle()), function()
         UIManager:close(menu)
         self:showAllContexts()
+    end)
+    self:addFooterButton(menu, "right", _("\u{2194} Relationships"), function()
+        UIManager:close(menu)
+        self:showRelationships(key)
     end)
     self:addFooterButton(menu, "right", _("\u{FF0B} Add dot point"), function()
         UIManager:close(menu)
@@ -444,38 +486,69 @@ end
 
 --viewing contexts for a book
 
+--section order for the grouped list: the real types first, then "No type" last.
+--each entry maps a node type to its bold section header
+local CONTEXT_SECTIONS = {
+    { type = "character", header = _("Characters") },
+    { type = "place",     header = _("Locations") },
+    { type = "object",    header = _("Objects") },
+    { type = "concept",   header = _("Concepts") },
+    { type = "unset",     header = _("No type") },
+}
+
 function ContextView:showAllContexts()
     local doc = self.store:load()
-    local items = {}
+
+    --bucket the nodes by type so each can go under its own section
+    local buckets = {}
+    local total = 0
     for key, node in pairs(doc.nodes) do
-        local label = ContextSchema.typeLabel(node.type)
-        local text = label ~= ""
-            and T("%1  \u{00B7} %2  (%3)", node.title, label, #node.points)
-            or T("%1  (%2)", node.title, #node.points)
-        table.insert(items, { text = text, _key = key, _title = node.title })
+        local t = (node.type == nil or node.type == "") and "unset" or node.type
+        buckets[t] = buckets[t] or {}
+        table.insert(buckets[t], { key = key, title = node.title, n = #node.points })
+        total = total + 1
     end
 
-    if #items == 0 then
+    if total == 0 then
         UIManager:show(InfoMessage:new{
             text = _("No context entries for this book yet.\n\nLong-press a word while reading and tap \"Add to context\" to start."),
         })
         return
     end
 
-    table.sort(items, function(a, b) return a._title:lower() < b._title:lower() end)
+    --build the flat item list: a bold header per non-empty section, then its nodes sorted by name
+    local items = {}
+    for si = 1, #CONTEXT_SECTIONS do
+        local section = CONTEXT_SECTIONS[si]
+        local list = buckets[section.type]
+        if list and #list > 0 then
+            table.sort(list, function(a, b) return a.title:lower() < b.title:lower() end)
+            table.insert(items, { text = section.header, bold = true, _header = true })
+            for ni = 1, #list do
+                local entry = list[ni]
+                table.insert(items, {
+                    text = T("%1  (%2)", entry.title, pointsLabel(entry.n)),
+                    _key = entry.key,
+                    _title = entry.title,
+                })
+            end
+        end
+    end
 
     local menu
-    menu = Menu:new{
+    menu = SectionedMenu:new{
         title = T(_("Contexts: %1"), self.store:getBookTitle()),
         item_table = items,
         width = Screen:getWidth() - 2 * WINDOW_MARGIN,
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false, --keep the border but drop Menus rounded corners
         onMenuSelect = function(_self, item)
+            if item._header then return end --section headers aren't tappable
             UIManager:close(menu)
             self:openContext(item._key)
         end,
         onMenuHold = function(_self, item)
+            if item._header then return true end
             self:showNodeActions(menu, item._key)
             return true
         end,
@@ -507,7 +580,7 @@ function ContextView:showNodeActions(menu, key)
         title_align = "center",
         buttons = {
             {{
-                text = T(_("Set type (%1)"), ContextSchema.typeLabel(node.type) ~= "" and ContextSchema.typeLabel(node.type) or _("unset")),
+                text = T(_("Set type (currently %1)"), ContextSchema.typeLabel(node.type) ~= "" and ContextSchema.typeLabel(node.type) or _("unset")),
                 callback = function()
                     UIManager:close(dialog)
                     self:setNodeType(menu, key)
@@ -558,32 +631,47 @@ end
 --pick the node's type (character / place / object / concept / unset)
 function ContextView:setNodeType(menu, key)
     local dialog
+    local function applyType(t)
+        UIManager:close(dialog)
+        local doc = self.store:load()
+        local node = doc.nodes[key]
+        if node then
+            node.type = t
+            node.updated = ContextSchema.now()
+            self.store:save(doc)
+        end
+        UIManager:close(menu)
+        self:showAllContexts()
+    end
+
+    local node = self.store:load().nodes[key]
+    local is_unset = not node or node.type == nil or node.type == "" or node.type == "unset"
+
     local buttons = {}
     for i = 1, #ContextSchema.NODE_TYPES do
         local t = ContextSchema.NODE_TYPES[i]
-        table.insert(buttons, {{
-            text = t == "unset" and _("Unset") or ContextSchema.typeLabel(t),
-            callback = function()
-                UIManager:close(dialog)
-                local doc = self.store:load()
-                local node = doc.nodes[key]
-                if node then
-                    node.type = t
-                    node.updated = ContextSchema.now()
-                    self.store:save(doc)
-                end
-                UIManager:close(menu)
-                self:showAllContexts()
-            end,
-        }})
+        if t ~= "unset" then
+            table.insert(buttons, {{
+                text = ContextSchema.typeLabel(t),
+                callback = function() applyType(t) end,
+            }})
+        end
     end
-    table.insert(buttons, {{
+    --bottom row: cancel, plus "Unset type" only when there's actually a type to clear
+    local bottom = {{
         text = _("Cancel"),
         callback = function() UIManager:close(dialog) end,
-    }})
+    }}
+    if not is_unset then
+        table.insert(bottom, {
+            text = _("Unset type"),
+            callback = function() applyType("unset") end,
+        })
+    end
+    table.insert(buttons, bottom)
 
     dialog = ButtonDialog:new{
-        title = _("What kind of thing is this?"),
+        title = _("What type of context is this?"),
         title_align = "center",
         buttons = buttons,
     }
@@ -687,14 +775,14 @@ function ContextView:showLinkPicker(menu, from_key)
     UIManager:show(picker, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
 end
 
---name the link (e.g. "married to", "lives in") and create it. afterwards open it so dot points can be added.
+--name the link (e.g. "married to", "lives in"), then ask which way it points, then create it
 function ContextView:editRelationshipLabel(menu, from_key, to_key)
     local doc = self.store:load()
     local dialog
     dialog = InputDialog:new{
-        title = T(_("How are they related?\n%1 \u{2192} %2"), ContextSchema.titleForKey(doc, from_key), ContextSchema.titleForKey(doc, to_key)),
+        title = T(_("How are they related?\n%1 \u{2194} %2"), ContextSchema.titleForKey(doc, from_key), ContextSchema.titleForKey(doc, to_key)),
         input = "",
-        input_hint = _("e.g. married to, lives in, owns\u{2026}"),
+        input_hint = _("e.g. married to, lives in, kills\u{2026}"),
         buttons = {{
             {
                 text = _("Cancel"),
@@ -702,30 +790,66 @@ function ContextView:editRelationshipLabel(menu, from_key, to_key)
                 callback = function() UIManager:close(dialog) end,
             },
             {
-                text = _("Create link"),
+                text = _("Next"),
                 is_enter_default = true,
                 callback = function()
                     local label = ContextText.trim(dialog:getInputText())
                     UIManager:close(dialog)
                     if label == "" then return end
-                    local rel = {
-                        id = ContextSchema.genId(),
-                        from = from_key,
-                        to = to_key,
-                        label = label,
-                        points = {},
-                        updated = ContextSchema.now(),
-                    }
-                    table.insert(doc.relationships, rel)
-                    self.store:save(doc)
                     if menu then UIManager:close(menu) end
-                    self:showRelationshipView(rel.id) -- jump in so the user can add context to the link
+                    self:askDirection(label, from_key, to_key, function(rel_from, rel_to, directed)
+                        local d = self.store:load()
+                        local rel = {
+                            id = ContextSchema.genId(),
+                            from = rel_from,
+                            to = rel_to,
+                            label = label,
+                            directed = directed,
+                            points = {},
+                            updated = ContextSchema.now(),
+                        }
+                        table.insert(d.relationships, rel)
+                        self.store:save(d)
+                        self:showRelationshipView(rel.id) -- jump in so the user can add context to the link
+                    end)
                 end,
             },
         }},
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
+end
+
+--ask which way a link points: a_key -> b_key, b_key -> a_key (the flip), or no direction.
+--on_pick(from, to, directed) does the actual create-or-update work.
+function ContextView:askDirection(label, a_key, b_key, on_pick)
+    local doc = self.store:load()
+    local a = ContextSchema.titleForKey(doc, a_key)
+    local b = ContextSchema.titleForKey(doc, b_key)
+    local dialog
+    dialog = ButtonDialog:new{
+        title = T(_("Which way does \u{201C}%1\u{201D} go?"), label),
+        title_align = "center",
+        buttons = {
+            {{
+                text = T(_("%1  \u{2192}  %2"), a, b),
+                callback = function() UIManager:close(dialog); on_pick(a_key, b_key, true) end,
+            }},
+            {{
+                text = T(_("%1  \u{2192}  %2"), b, a), -- the flip
+                callback = function() UIManager:close(dialog); on_pick(b_key, a_key, true) end,
+            }},
+            {{
+                text = T(_("%1  \u{2194}  %2  (no direction)"), a, b),
+                callback = function() UIManager:close(dialog); on_pick(a_key, b_key, false) end,
+            }},
+            {{
+                text = _("Cancel"),
+                callback = function() UIManager:close(dialog) end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
 end
 
 --list relationships. key == nil lists every link in the book; otherwise only those touching that node.
@@ -735,8 +859,8 @@ function ContextView:showRelationships(key)
     for _, rel in ipairs(doc.relationships) do
         if key == nil or rel.from == key or rel.to == key then
             table.insert(items, {
-                text = T("%1  \u{2192}  %2  (%3)", ContextSchema.titleForKey(doc, rel.from),
-                    ContextSchema.titleForKey(doc, rel.to), rel.label),
+                text = T("%1  %2  %3  (%4)", ContextSchema.titleForKey(doc, rel.from),
+                    relArrow(rel), ContextSchema.titleForKey(doc, rel.to), rel.label),
                 _id = rel.id,
             })
         end
@@ -790,7 +914,7 @@ function ContextView:showRelationshipView(rel_id)
 
     local menu
     menu = Menu:new{
-        title = T(_("%1  \u{2192}  %2  (%3)"), ContextSchema.titleForKey(doc, rel.from), ContextSchema.titleForKey(doc, rel.to), rel.label),
+        title = T(_("%1  %2  %3  (%4)"), ContextSchema.titleForKey(doc, rel.from), relArrow(rel), ContextSchema.titleForKey(doc, rel.to), rel.label),
         item_table = items,
         width = Screen:getWidth() - 2 * WINDOW_MARGIN,
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
@@ -818,23 +942,47 @@ function ContextView:showRelationshipView(rel_id)
     UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
 end
 
---long-press a relationship in the list: delete it (tombstoned for sync)
+--long-press a relationship in the list: change its direction or delete it (delete is tombstoned for sync)
 function ContextView:showRelationshipActions(menu, rel_id, list_key)
+    local doc = self.store:load()
+    local rel = ContextSchema.findRel(doc, rel_id)
+    if not rel then return end
+
     local dialog
     dialog = ButtonDialog:new{
-        title = _("Delete this relationship?"),
+        title = T("%1  %2  %3  (%4)", ContextSchema.titleForKey(doc, rel.from), relArrow(rel),
+            ContextSchema.titleForKey(doc, rel.to), rel.label),
         title_align = "center",
         buttons = {
+            {{
+                text = _("Direction"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:askDirection(rel.label, rel.from, rel.to, function(rel_from, rel_to, directed)
+                        local d = self.store:load()
+                        local r = ContextSchema.findRel(d, rel_id)
+                        if r then
+                            r.from = rel_from
+                            r.to = rel_to
+                            r.directed = directed
+                            r.updated = ContextSchema.now()
+                            self.store:save(d)
+                        end
+                        UIManager:close(menu)
+                        self:showRelationships(list_key)
+                    end)
+                end,
+            }},
             {{
                 text = _("Delete"),
                 callback = function()
                     UIManager:close(dialog)
-                    local doc = self.store:load()
-                    local _, idx = ContextSchema.findRel(doc, rel_id)
+                    local d = self.store:load()
+                    local _, idx = ContextSchema.findRel(d, rel_id)
                     if idx then
-                        doc.tombstones.relationships[rel_id] = ContextSchema.now()
-                        table.remove(doc.relationships, idx)
-                        self.store:save(doc)
+                        d.tombstones.relationships[rel_id] = ContextSchema.now()
+                        table.remove(d.relationships, idx)
+                        self.store:save(d)
                     end
                     UIManager:close(menu)
                     self:showRelationships(list_key)

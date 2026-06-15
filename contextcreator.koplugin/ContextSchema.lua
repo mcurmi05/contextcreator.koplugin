@@ -12,7 +12,7 @@ doc shape:
     book = { id, title, authors },
     updated = <epoch>,                                  -- file-level last change, for cheap sync checks
     nodes = { [key] = { title, type, points, updated } },  -- key = ContextText.normalizeWord(title)
-    relationships = { { id, from, to, label, points, updated }, ... },
+    relationships = { { id, from, to, label, directed, points, updated }, ... },  -- directed=false means no arrow; missing means directed (made before undirected existed)
     tombstones = { nodes = { [key] = <epoch> }, relationships = { [id] = <epoch> } },
   }
 ]]
@@ -24,13 +24,20 @@ local ContextSchema = {}
 --current on disk schema version
 ContextSchema.VERSION = 2
 
---the kinds of thing a node can be. "unset" is the default until the user picks one
+--the kinds of thing a node can be. "unset" is the default until the user picks one.
+--the keys are stored on disk (and synced), the labels are just what we show the user, so we can
+--display "place" as "Location" without touching saved data
 ContextSchema.NODE_TYPES = { "character", "place", "object", "concept", "unset" }
+local TYPE_LABELS = {
+    character = "Character",
+    place = "Location",
+    object = "Object",
+    concept = "Concept",
+}
 
---human label for a node type, shown in the lists (unset stays blank so it doesn't clutter)
+--human label for a node type, shown in the lists (unset/unknown stays blank so it doesn't clutter)
 function ContextSchema.typeLabel(t)
-    if not t or t == "unset" or t == "" then return "" end
-    return t:sub(1, 1):upper() .. t:sub(2)
+    return TYPE_LABELS[t] or ""
 end
 
 --epoch seconds, stamped on every entity edit so last-write-wins merge has something to compare
