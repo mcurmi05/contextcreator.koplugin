@@ -8,7 +8,15 @@ export default {
         paper: { DEFAULT: "#FAF7F2", card: "#FFFFFF", sunk: "#F3EEE6" },
         ink: { DEFAULT: "#1C1917", soft: "#57534E", faint: "#A8A29E" },
         line: { DEFAULT: "#E8E2D9", strong: "#D8D0C4" },
-        accent: { DEFAULT: "#C2620B", hover: "#9A4D08", soft: "#FBEAD3", ring: "#E08C2E" },
+        //driven by CSS variables so the user can re-theme at runtime (see theme.ts). channel-based
+        //vars (rgb) keep tailwind's /opacity modifiers working.
+        accent: {
+          DEFAULT: "rgb(var(--accent-rgb) / <alpha-value>)",
+          hover: "var(--accent-hover)",
+          soft: "var(--accent-soft)",
+          ring: "rgb(var(--accent-ring-rgb) / <alpha-value>)",
+        },
+        scrub: "rgb(var(--scrub-rgb) / <alpha-value>)",
       },
       fontFamily: {
         sans: ['"Fira Sans"', "ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],

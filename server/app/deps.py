@@ -11,6 +11,18 @@ from .models import User
 from .security import verify_password
 
 
+def admin_user_id(session: Session) -> int | None:
+    #the first account created (lowest id) is the admin — no schema flag needed
+    return session.exec(select(User.id).order_by(User.id)).first()
+
+
+def require_admin(request: Request, session: Session = Depends(get_session)) -> User:
+    user = get_current_user(request, session)
+    if user.id != admin_user_id(session):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
+    return user
+
+
 def get_current_user(request: Request, session: Session = Depends(get_session)) -> User:
     user_id = request.session.get("user_id")
     if not user_id:

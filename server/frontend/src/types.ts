@@ -40,6 +40,6 @@ export interface Doc {
   tombstones?: unknown;
 }
 
-export interface BookSummary { book_id: string; title?: string; authors?: string; updated?: number; }
-export interface User { id: number; username: string; }
+export interface BookSummary { book_id: string; title?: string; authors?: string; series?: string; series_index?: number; updated?: number; }
+export interface User { id: number; username: string; is_admin?: boolean; }
 export type Selected = { kind: "context" | "relationship"; id: string } | null;

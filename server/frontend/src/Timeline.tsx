@@ -31,11 +31,11 @@ export default function Timeline({ doc, scrub, onScrub }: {
       <div className="relative h-2.5 rounded-full bg-paper-sunk border border-line overflow-hidden">
         {/* band for the current chapter */}
         {curChapter && (
-          <div className="absolute top-0 bottom-0 bg-accent/10 border-x border-accent/40"
+          <div className="absolute top-0 bottom-0 bg-scrub/10 border-x border-scrub/40"
                style={{ left: curStart * 100 + "%", width: (curEnd - curStart) * 100 + "%" }} />
         )}
         {/* "so far" fill */}
-        <div className="absolute left-0 top-0 bottom-0 bg-accent/55 rounded-full" style={{ width: scrub * 100 + "%" }} />
+        <div className="absolute left-0 top-0 bottom-0 bg-scrub/55 rounded-full" style={{ width: scrub * 100 + "%" }} />
         {/* chapter boundary ticks */}
         {toc.map((c, i) => (
           <div key={i} className="absolute top-0 bottom-0 w-px bg-line-strong" style={{ left: c.progress * 100 + "%" }} />

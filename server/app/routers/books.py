@@ -29,6 +29,11 @@ class PointEdit(BaseModel):
     index: int | None = None
 
 
+class BookMetaIn(BaseModel):
+    series: str | None = None
+    series_index: int | None = None
+
+
 def _get_row(session, user, book_id) -> Book:
     row = session.exec(
         select(Book).where(Book.user_id == user.id, Book.book_id == book_id)
@@ -49,7 +54,8 @@ def _save(session, row, doc):
 def list_books(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     books = session.exec(select(Book).where(Book.user_id == user.id)).all()
     return [
-        {"book_id": b.book_id, "title": b.title, "authors": b.authors, "updated": b.updated}
+        {"book_id": b.book_id, "title": b.title, "authors": b.authors,
+         "series": b.series, "series_index": b.series_index, "updated": b.updated}
         for b in books
     ]
 
@@ -58,6 +64,18 @@ def list_books(user: User = Depends(get_current_user), session: Session = Depend
 def get_book(book_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     #the full stored document, so the web ui can show what's been synced
     return json.loads(_get_row(session, user, book_id).doc_json)
+
+
+@router.patch("/books/{book_id}/meta")
+def set_book_meta(book_id: str, body: BookMetaIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #set web-only book metadata (currently just the series grouping label)
+    row = _get_row(session, user, book_id)
+    if body.series is not None:
+        row.series = body.series.strip()
+    if body.series_index is not None:
+        row.series_index = body.series_index
+    session.commit()
+    return {"book_id": row.book_id, "series": row.series, "series_index": row.series_index}
 
 
 @router.post("/books/{book_id}/contexts")

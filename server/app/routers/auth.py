@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..db import get_session
-from ..deps import get_current_user
+from ..deps import admin_user_id, get_current_user
 from ..models import User
 from ..security import hash_password, verify_password
 
@@ -13,6 +13,11 @@ router = APIRouter(prefix="/api", tags=["auth"])
 class Credentials(BaseModel):
     username: str
     password: str
+
+class AccountUpdate(BaseModel):
+    current_password: str
+    new_username: str | None = None
+    new_password: str | None = None
 
 def _has_any_user(session: Session) -> bool:
     return session.exec(select(User)).first() is not None
@@ -49,5 +54,23 @@ def logout(request: Request):
     return {"ok": True}
 
 @router.get("/me")
-def me(user: User = Depends(get_current_user)):
-    return {"id": user.id, "username": user.username}
+def me(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    return {"id": user.id, "username": user.username, "is_admin": user.id == admin_user_id(session)}
+
+@router.post("/account")
+def update_account(body: AccountUpdate, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #change your own username and/or password, gated on re-entering your current password
+    if not verify_password(user.password_hash, body.current_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="current password is incorrect")
+    if body.new_username is not None and body.new_username.strip():
+        new_username = body.new_username.strip()
+        clash = session.exec(select(User).where(User.username == new_username)).first()
+        if clash and clash.id != user.id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="username already taken")
+        user.username = new_username
+    if body.new_password:
+        user.password_hash = hash_password(body.new_password)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return {"id": user.id, "username": user.username, "is_admin": user.id == admin_user_id(session)}

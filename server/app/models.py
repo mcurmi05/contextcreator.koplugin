@@ -19,5 +19,7 @@ class Book(SQLModel, table=True):
     book_id: str = Field(index=True)
     title: str = ""
     authors: str = ""
+    series: str = ""          #optional grouping label, set from the web ui
+    series_index: int = 0     #order within the series (left to right)
     doc_json: str = "{}"
-    updated: int = 0  
+    updated: int = 0

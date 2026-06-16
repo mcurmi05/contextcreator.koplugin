@@ -5,6 +5,15 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* defaults; theme.ts overrides these from saved settings */
+    --accent-rgb: 194 98 11;
+    --accent-hover: #9a4d08;
+    --accent-soft: #fbead3;
+    --accent-ring-rgb: 224 140 46;
+    --scrub-rgb: 194 98 11;
+    --scrub: #c2620b;
+  }
   html, body, #root { height: 100%; }
   body {
     @apply bg-paper text-ink font-sans antialiased;
@@ -26,13 +35,13 @@
   .scrubber::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
     width: 18px; height: 18px; margin-top: -7px; border-radius: 9999px;
-    background: #C2620B; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(28,25,23,0.3);
+    background: var(--scrub); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(28,25,23,0.3);
     transition: transform 150ms ease;
   }
   .scrubber:hover::-webkit-slider-thumb { transform: scale(1.12); }
   .scrubber::-moz-range-thumb {
     width: 16px; height: 16px; border-radius: 9999px;
-    background: #C2620B; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(28,25,23,0.3);
+    background: var(--scrub); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(28,25,23,0.3);
   }
 }
 

@@ -235,6 +235,20 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, doc]);
 
+  //tidy reset: lay the visible nodes out on an even grid and stop the live sim so they stay put
+  function resetLayout() {
+    const cy = cyRef.current; if (!cy) return;
+    layoutRef.current?.stop();
+    const visible = cy.nodes().filter((n) => n.style("display") !== "none");
+    const eles = visible.length ? visible : cy.nodes();
+    const layout = eles.layout({
+      name: "grid", animate: true, animationDuration: 400, avoidOverlap: true, fit: false, spacingFactor: 1.3,
+    } as cytoscape.LayoutOptions);
+    layoutRef.current = layout as unknown as { stop: () => void };
+    layout.run();
+    setTimeout(() => cy.animate({ fit: { eles, padding: 60 }, duration: 320 }), 420);
+  }
+
   //legend / filter data: which types are actually present, with counts
   const contexts = doc.contexts || {};
   const counts: Record<string, number> = {};
@@ -295,14 +309,15 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
         )
       )}
 
-      {/* zoom / fit controls */}
+      {/* zoom / fit / reset controls */}
       <div className="absolute bottom-3 right-3 z-10 flex flex-col rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card overflow-hidden">
         <button className={`${btnGhost} rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom in"
                 onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) * 1.25, duration: 150 })}>+</button>
         <button className={`${btnGhost} rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom out"
                 onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) / 1.25, duration: 150 })}>−</button>
-        <button className={`${btnGhost} rounded-none px-2.5 py-1.5`} title="Fit to view"
+        <button className={`${btnGhost} rounded-none px-2.5 py-1.5 border-b border-line`} title="Fit to view"
                 onClick={() => { const cy = cyRef.current; if (cy) cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 300 }); }}>⤢</button>
+        <button className={`${btnGhost} rounded-none px-2.5 py-1.5`} title="Reset layout (space nodes evenly)" onClick={resetLayout}>⊞</button>
       </div>
 
       {/* the anchored note card (absolute, positioned every frame by the rAF loop above) */}

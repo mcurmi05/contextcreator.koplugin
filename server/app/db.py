@@ -11,6 +11,18 @@ def init_db():
     #import models so their tables are registered before create_all
     from . import models  # noqa: F401
     SQLModel.metadata.create_all(engine)
+    _migrate()
+
+
+def _migrate():
+    #create_all never alters existing tables, so add columns introduced after a db already exists
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(book)")}
+        if "series" not in cols:
+            conn.exec_driver_sql("ALTER TABLE book ADD COLUMN series VARCHAR DEFAULT ''")
+        if "series_index" not in cols:
+            conn.exec_driver_sql("ALTER TABLE book ADD COLUMN series_index INTEGER DEFAULT 0")
+        conn.commit()
 
 def get_session():
     with Session(engine) as session:
