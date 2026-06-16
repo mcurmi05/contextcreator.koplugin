@@ -25,6 +25,7 @@ The server is a single Docker image. Drop this `docker-compose.yml` on your mach
 ```yaml
 services:
   contextcreator:
+    container_name: koreader-context-creator
     image: mcurmi05/koreader-context-creator:latest
     ports:
       - "8791:8791"
