@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { btn, btnAccent, input } from "./ui";
 import { DEFAULT_THEME, type Theme } from "./theme";
+import { downloadJson, readJsonFile } from "./files";
+import { loadTypeColors, saveTypeColors } from "./typeColors";
 import type { User } from "./types";
 
 interface UserRow { id: number; username: string; is_admin: boolean }
@@ -12,6 +14,8 @@ export default function Settings({ me, theme, onThemeChange, onAccountChanged, o
   me: User; theme: Theme;
   onThemeChange: (t: Theme) => void; onAccountChanged: () => void; onClose: () => void;
 }) {
+  const [tab, setTab] = useState<"appearance" | "data" | "account">("appearance");
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -19,6 +23,12 @@ export default function Settings({ me, theme, onThemeChange, onAccountChanged, o
   }, [onClose]);
 
   const set = (patch: Partial<Theme>) => onThemeChange({ ...theme, ...patch });
+
+  const tabs = [
+    { id: "appearance", label: "Appearance" },
+    { id: "data", label: "Import / export" },
+    { id: "account", label: me.is_admin ? "Account & users" : "Account" },
+  ] as const;
 
   function onLogoFile(file: File | undefined) {
     if (!file) return;
@@ -31,16 +41,28 @@ export default function Settings({ me, theme, onThemeChange, onAccountChanged, o
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 animate-fadein" onClick={onClose}>
       <div className="w-full max-w-lg max-h-[85vh] overflow-auto rounded-2xl border border-line bg-paper-card shadow-pop animate-pop"
            onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 flex items-center gap-2 px-5 py-3 border-b border-line bg-paper-card/95 backdrop-blur">
-          <strong className="text-lg">Settings</strong>
-          <span className="flex-1" />
-          <button className="text-ink-faint hover:text-ink transition text-2xl leading-none" onClick={onClose} aria-label="Close">×</button>
+        <div className="sticky top-0 z-10 px-5 pt-3 border-b border-line bg-paper-card/95 backdrop-blur">
+          <div className="flex items-center gap-2">
+            <strong className="text-lg">Settings</strong>
+            <span className="flex-1" />
+            <button className="text-ink-faint hover:text-ink transition text-2xl leading-none" onClick={onClose} aria-label="Close">×</button>
+          </div>
+          <div className="flex gap-1 mt-3 -mb-px">
+            {tabs.map((t) => (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                      className={`px-3 py-1.5 rounded-t-lg text-sm font-medium border-b-2 transition ${
+                        tab === t.id ? "border-accent text-ink" : "border-transparent text-ink-soft hover:text-ink"}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="p-5 flex flex-col gap-7">
-          <Appearance theme={theme} set={set} onLogoFile={onLogoFile} />
-          <Account onChanged={onAccountChanged} />
-          {me.is_admin && <Users />}
+          {tab === "appearance" && <Appearance theme={theme} set={set} onLogoFile={onLogoFile} />}
+          {tab === "data" && <DataSection theme={theme} onThemeChange={onThemeChange} />}
+          {tab === "account" && <Account onChanged={onAccountChanged} />}
+          {tab === "account" && me.is_admin && <Users />}
         </div>
       </div>
     </div>
@@ -65,13 +87,17 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function ColorField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function ColorField({ value, onChange, onReset, isDefault }: {
+  value: string; onChange: (v: string) => void; onReset: () => void; isDefault: boolean;
+}) {
   return (
     <>
       <input type="color" value={value} onChange={(e) => onChange(e.target.value)}
              className="h-8 w-10 rounded-md border border-line bg-paper-card cursor-pointer p-0.5" />
       <input className={`${input} w-28 font-mono`} value={value}
              onChange={(e) => onChange(e.target.value)} spellCheck={false} />
+      <button className={`${btn} px-2 py-1 ${isDefault ? "opacity-40 pointer-events-none" : ""}`}
+              title="Reset to default" onClick={onReset}>↺</button>
     </>
   );
 }
@@ -81,8 +107,14 @@ function Appearance({ theme, set, onLogoFile }: {
 }) {
   return (
     <Section title="Appearance">
-      <Row label="Accent colour"><ColorField value={theme.accent} onChange={(v) => set({ accent: v })} /></Row>
-      <Row label="Timeline colour"><ColorField value={theme.scrub} onChange={(v) => set({ scrub: v })} /></Row>
+      <Row label="Accent colour">
+        <ColorField value={theme.accent} onChange={(v) => set({ accent: v })}
+                    onReset={() => set({ accent: DEFAULT_THEME.accent })} isDefault={theme.accent === DEFAULT_THEME.accent} />
+      </Row>
+      <Row label="Timeline colour">
+        <ColorField value={theme.scrub} onChange={(v) => set({ scrub: v })}
+                    onReset={() => set({ scrub: DEFAULT_THEME.scrub })} isDefault={theme.scrub === DEFAULT_THEME.scrub} />
+      </Row>
       <Row label="Title">
         <input className={`${input} flex-1`} value={theme.title} placeholder="Context Creator"
                onChange={(e) => set({ title: e.target.value })} />
@@ -99,6 +131,54 @@ function Appearance({ theme, set, onLogoFile }: {
       <div>
         <button className={btn} onClick={() => set({ ...DEFAULT_THEME })}>Reset appearance to defaults</button>
       </div>
+    </Section>
+  );
+}
+
+function DataSection({ theme, onThemeChange }: { theme: Theme; onThemeChange: (t: Theme) => void }) {
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function exportAppearance() {
+    downloadJson("context-creator-appearance.json", { type: "context-creator-appearance", version: 1, theme, typeColors: loadTypeColors() });
+  }
+  async function importAppearance(file: File) {
+    setMsg(null);
+    try {
+      const data = await readJsonFile<{ theme?: Partial<Theme>; typeColors?: Record<string, string> }>(file);
+      if (data.theme) onThemeChange({ ...DEFAULT_THEME, ...data.theme });
+      if (data.typeColors && typeof data.typeColors === "object") saveTypeColors(data.typeColors);
+      setMsg({ ok: true, text: "appearance imported" });
+    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+  }
+  async function exportContexts() {
+    setMsg(null);
+    try { downloadJson("context-creator-contexts.json", await api("/api/export")); }
+    catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+  }
+  async function importContexts(file: File) {
+    setMsg(null);
+    try {
+      const data = await readJsonFile(file);
+      const r = await api<{ imported: number }>("/api/import", { method: "POST", body: JSON.stringify(data) });
+      setMsg({ ok: true, text: `imported ${r.imported} book${r.imported === 1 ? "" : "s"} (merged)` });
+    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+  }
+  const pick = (handler: (f: File) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; e.target.value = ""; if (f) handler(f);
+  };
+
+  return (
+    <Section title="Import / export">
+      <Row label="Appearance">
+        <button className={btn} onClick={exportAppearance}>Export</button>
+        <label className={`${btn} cursor-pointer`}>Import<input type="file" accept=".json,application/json" className="hidden" onChange={pick(importAppearance)} /></label>
+      </Row>
+      <Row label="All contexts">
+        <button className={btn} onClick={exportContexts}>Export</button>
+        <label className={`${btn} cursor-pointer`}>Import<input type="file" accept=".json,application/json" className="hidden" onChange={pick(importContexts)} /></label>
+      </Row>
+      {msg && <span className={`text-sm ${msg.ok ? "text-green-700" : "text-red-600"}`}>{msg.text}</span>}
+      <p className="text-xs text-ink-faint">Importing contexts merges into your books, nothing is overwritten or lost. You can also export/import a single book from its page.</p>
     </Section>
   );
 }

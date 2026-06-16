@@ -136,20 +136,19 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
                     </button>
                     <div className="mt-2 pt-2 border-t border-line">
                       {editing === b.book_id ? (
-                        <div>
+                        <form onSubmit={(e) => { e.preventDefault(); void saveSeries(b.book_id); }}>
                           <div className="flex gap-1.5 items-center">
                             <input autoFocus list="series-list" className={`${input} flex-1 py-1 min-w-0`} placeholder="series name" value={name}
                                    onChange={(e) => setName(e.target.value)}
-                                   onKeyDown={(e) => { if (e.key === "Enter") saveSeries(b.book_id); if (e.key === "Escape") { setEditing(null); setError(""); } }} />
+                                   onKeyDown={(e) => { if (e.key === "Escape") { setEditing(null); setError(""); } }} />
                             <input type="number" min={1} className={`${input} w-14 py-1`} placeholder="#" value={pos}
-                                   onChange={(e) => setPos(e.target.value)}
-                                   onKeyDown={(e) => { if (e.key === "Enter") saveSeries(b.book_id); }} />
+                                   onChange={(e) => setPos(e.target.value)} />
                           </div>
                           <div className="flex gap-1.5 mt-1.5">
-                            <button className={`${btnAccent} py-1`} onClick={() => saveSeries(b.book_id)}>Save</button>
-                            <button className={`${btn} py-1`} onClick={() => { setEditing(null); setError(""); }}>Cancel</button>
+                            <button type="submit" className={`${btnAccent} py-1`}>Save</button>
+                            <button type="button" className={`${btn} py-1`} onClick={() => { setEditing(null); setError(""); }}>Cancel</button>
                           </div>
-                        </div>
+                        </form>
                       ) : (
                         <button className="text-xs text-ink-soft hover:text-accent-hover transition"
                                 onClick={() => { setEditing(b.book_id); setName(b.series || ""); setPos(b.series ? String((b.series_index ?? 0) + 1) : ""); setError(""); }}>

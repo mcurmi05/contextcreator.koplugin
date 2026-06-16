@@ -6,6 +6,7 @@ import Timeline from "./Timeline";
 import DetailPanel from "./DetailPanel";
 import { btn } from "./ui";
 import { loadTypeColors, saveTypeColors } from "./typeColors";
+import { downloadJson, readJsonFile, slug } from "./files";
 import type { Doc, Selected } from "./types";
 
 export default function BookView({ bookId, onBack }: { bookId: string; onBack: () => void }) {
@@ -57,6 +58,16 @@ export default function BookView({ bookId, onBack }: { bookId: string; onBack: (
   function toggleType(t: string) {
     setHiddenTypes((prev) => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; });
   }
+  function exportBook() {
+    if (doc) downloadJson(`${slug(doc.book?.title || bookId)}-contexts.json`, doc);
+  }
+  async function importBook(file: File) {
+    try {
+      const data = await readJsonFile(file);
+      await api(`/api/books/${encodeURIComponent(bookId)}/import`, { method: "POST", body: JSON.stringify(data) });
+      await reload();
+    } catch (e) { alert("Import failed: " + (e as Error).message); }
+  }
   function setTypeColor(t: string, color: string | null) {
     setTypeColors((prev) => {
       const n = { ...prev };
@@ -84,6 +95,12 @@ export default function BookView({ bookId, onBack }: { bookId: string; onBack: (
           </p>
         </div>
         <span className="flex-1" />
+        <button className={btn} onClick={exportBook} title="Download this book's contexts">Export</button>
+        <label className={`${btn} cursor-pointer`} title="Merge a contexts file into this book">
+          Import
+          <input type="file" accept=".json,application/json" className="hidden"
+                 onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void importBook(f); }} />
+        </label>
         <div className="flex p-0.5 rounded-lg border border-line bg-paper-sunk">
           {(["graph", "browse"] as const).map((v) => (
             <button key={v} onClick={() => setTab(v)}
