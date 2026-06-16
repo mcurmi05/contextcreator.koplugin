@@ -91,7 +91,8 @@ export default function App() {
           </div>
         )}
         {phase === "book" && bookId && (
-          <BookView bookId={bookId} onBack={() => { setBookId(null); setPhase("books"); }} />
+          <BookView bookId={bookId} onBack={() => { setBookId(null); setPhase("books"); }}
+                    graph={theme.graph} onGraphChange={(g) => setTheme({ ...theme, graph: g })} />
         )}
       </main>
 

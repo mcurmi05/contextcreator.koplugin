@@ -4,7 +4,10 @@ import cola from "cytoscape-cola";
 import { colorFor, contextProgress, pointText, pointProgress, typeLabel, TYPE_LABELS } from "./model";
 import { btnGhost } from "./ui";
 import PointItem from "./PointItem";
+import type { GraphPrefs, XY } from "./theme";
 import type { Doc, Point, Selected } from "./types";
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 //ref to locate a point for editing: by stable id when it has one, else by list index
 const pointRef = (p: Point, i: number) => ({ id: typeof p === "object" ? p.id : undefined, index: i });
@@ -33,7 +36,7 @@ const nodeSize = (n: number) => 28 + Math.min(n * 4, 24);
 //per-book graph. contexts are springy nodes (coloured by type, sized by note count), relationships
 //are edges. hovering spotlights a neighbourhood, selecting pops a note card anchored to the node
 //(rather than just outlining the circle), and the scrub fades in nodes as the story reaches them.
-export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onToggleType, typeColors, onSetTypeColor, onAddPoint, onEditPoint, onMoveNodes }: {
+export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onToggleType, typeColors, onSetTypeColor, onAddPoint, onEditPoint, onMoveNodes, graph, onGraphChange }: {
   doc: Doc; scrub: number; selected: Selected;
   onSelect: (s: Selected) => void;
   hiddenTypes: Set<string>; onToggleType: (t: string) => void;
@@ -41,6 +44,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   onAddPoint: (key: string, text: string) => void;
   onEditPoint: (key: string, ref: { id?: string; index: number }, text: string) => void;
   onMoveNodes: (positions: Record<string, { x: number; y: number }>, record: boolean) => void;
+  graph: GraphPrefs; onGraphChange: (g: GraphPrefs) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -58,10 +62,63 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   const colorsRef = useRef(typeColors);                  //user colour overrides, read inside nodeData
   const onMoveRef = useRef(onMoveNodes);                  //latest position-save callback, for the once-bound drag handler
   const saveTimer = useRef<number>(0);
+  const hoverFocusRef = useRef(true);                    //whether hovering a node spotlights its neighbourhood
+  const hoverBtnRef = useRef<HTMLButtonElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const clickGuardRef = useRef(false);                   //set right after a drag so the trailing click is ignored
+  const graphRef = useRef(graph);                        //latest prefs, read inside the rAF card-placement loop
   useEffect(() => { onMoveRef.current = onMoveNodes; }, [onMoveNodes]);
+  useEffect(() => { graphRef.current = graph; }, [graph]);
 
   const [noteText, setNoteText] = useState("");
   const [legendOpen, setLegendOpen] = useState(true);
+  const [hoverFocus, setHoverFocus] = useState(true);
+  //which overlay is being dragged + its live fractional position, so it moves under the cursor before
+  //we commit the final spot to the (persisted, exportable) config on drop
+  const [dragging, setDragging] = useState<{ which: "hover" | "controls" | "card"; p: XY } | null>(null);
+
+  //drag an overlay (hover button / controls / card) to a new spot in the container. distinguishes a
+  //real drag from a click via a small movement threshold; commits to the shared config on drop.
+  function startDrag(e: React.PointerEvent, el: HTMLElement | null, which: "hover" | "controls" | "card") {
+    const box = containerRef.current;
+    if (!box || !el) return;
+    e.preventDefault();
+    const boxRect = box.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    const grabX = e.clientX - elRect.left, grabY = e.clientY - elRect.top;
+    const w = elRect.width, h = elRect.height;
+    const startX = e.clientX, startY = e.clientY;
+    let moved = false, last: XY = { x: elRect.left - boxRect.left, y: elRect.top - boxRect.top };
+    last = { x: last.x / boxRect.width, y: last.y / boxRect.height };
+    const onMove = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
+      moved = true;
+      const left = clamp(ev.clientX - boxRect.left - grabX, 0, Math.max(0, boxRect.width - w));
+      const top = clamp(ev.clientY - boxRect.top - grabY, 0, Math.max(0, boxRect.height - h));
+      last = { x: left / boxRect.width, y: top / boxRect.height };
+      setDragging({ which, p: last });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setDragging(null);
+      if (!moved) return;
+      clickGuardRef.current = true;                       //swallow the click that follows this drag
+      setTimeout(() => { clickGuardRef.current = false; }, 0);
+      const g = graphRef.current;
+      if (which === "hover") onGraphChange({ ...g, hoverBtnPos: last });
+      else if (which === "controls") onGraphChange({ ...g, controlsPos: last });
+      else onGraphChange({ ...g, cardPos: last });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+  //resolve the on-screen spot for an overlay: the live drag position if it's the one moving, else the
+  //saved position (a fraction), or null to fall back to the default corner css
+  const posFor = (which: "hover" | "controls" | "card", saved: XY | null): XY | null =>
+    dragging?.which === which ? dragging.p : saved;
+  const pctStyle = (p: XY | null): React.CSSProperties | undefined =>
+    p ? { left: `${p.x * 100}%`, top: `${p.y * 100}%`, right: "auto", bottom: "auto" } : undefined;
 
   //collect every node's position and hand it up to be saved. `record` marks a user move (undoable);
   //the auto-save after an initial arrange passes false so it doesn't create an undo step.
@@ -142,7 +199,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
       cy.getElementById(id).connectedEdges().connectedNodes().forEach((n) => { set.add(n.id()); });
       return set;
     };
-    cy.on("mouseover", "node", (e) => { focusRef.current = neighbourhood(e.target.id()); refresh(); });
+    cy.on("mouseover", "node", (e) => { if (!hoverFocusRef.current) return; focusRef.current = neighbourhood(e.target.id()); refresh(); });
     cy.on("mouseout", "node", () => { focusRef.current = selFocusRef.current; refresh(); });
     cy.on("tap", "node", (e) => onSelect({ kind: "context", id: e.target.id() }));
     cy.on("tap", "edge", (e) => onSelect({ kind: "relationship", id: e.target.id() }));
@@ -156,6 +213,11 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   //sync refs + repaint when scrub/filter change (no relayout)
   useEffect(() => { scrubRef.current = scrub; refresh(); }, [scrub]);
   useEffect(() => { hiddenRef.current = hiddenTypes; refresh(); }, [hiddenTypes]);
+  //when hover-focus is switched off, drop any live hover spotlight back to the selection's (or none)
+  useEffect(() => {
+    hoverFocusRef.current = hoverFocus;
+    if (!hoverFocus) { focusRef.current = selFocusRef.current; refresh(); }
+  }, [hoverFocus]);
 
   //recolour nodes in place when the user changes a type's colour (node + halo read data(color))
   useEffect(() => {
@@ -241,12 +303,19 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     }
     selFocusRef.current = focus; focusRef.current = focus; refresh();
 
-    //follow the element every frame so the card rides the live physics (and panning/zooming)
+    //place the card each frame. fixed mode pins it to the user's spot (React sets left/top), so we only
+    //keep it visible. anchored mode follows the element on the chosen side, riding the live physics/pan.
     const place = () => {
       const card = cardRef.current, box = containerRef.current;
+      if (!card || !box) { rafRef.current = requestAnimationFrame(place); return; }
+      if (graphRef.current.cardMode === "fixed") {
+        card.style.visibility = "visible";
+        rafRef.current = requestAnimationFrame(place);
+        return;
+      }
       const visible = el.nonempty() && el.style("display") !== "none";
-      if (card) card.style.visibility = visible ? "visible" : "hidden";
-      if (card && box && visible) {
+      card.style.visibility = visible ? "visible" : "hidden";
+      if (visible) {
         let p: cytoscape.Position;
         if (selected.kind === "context") {
           p = el.renderedPosition();
@@ -257,11 +326,21 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
         const W = box.clientWidth, H = box.clientHeight;
         const cw = card.offsetWidth, ch = card.offsetHeight;
         const r = selected.kind === "context" ? (el.renderedWidth() / 2) : 8;
-        let x = p.x + r + 16;
-        if (x + cw > W - 8) x = p.x - r - 16 - cw;
-        const y = Math.max(8, Math.min(p.y - 24, H - ch - 8));
-        card.style.left = Math.max(8, x) + "px";
-        card.style.top = y + "px";
+        const gap = 16;
+        let x: number, y: number;
+        switch (graphRef.current.cardSide) {
+          case "left":  x = p.x - r - gap - cw; y = p.y - ch / 2; break;
+          case "above": x = p.x - cw / 2; y = p.y - r - gap - ch; break;
+          case "below": x = p.x - cw / 2; y = p.y + r + gap; break;
+          default:      x = p.x + r + gap; y = p.y - ch / 2;       //right
+        }
+        //flip to the opposite side if the preferred one runs off the edge
+        if (x + cw > W - 8) x = p.x - r - gap - cw;
+        if (x < 8) x = p.x + r + gap;
+        if (y + ch > H - 8) y = p.y - r - gap - ch;
+        if (y < 8) y = p.y + r + gap;
+        card.style.left = clamp(x, 8, Math.max(8, W - cw - 8)) + "px";
+        card.style.top = clamp(y, 8, Math.max(8, H - ch - 8)) + "px";
       }
       rafRef.current = requestAnimationFrame(place);
     };
@@ -344,8 +423,34 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
         )
       )}
 
-      {/* zoom / fit / reset controls */}
-      <div className="absolute bottom-3 right-3 z-10 flex flex-col rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card overflow-hidden">
+      {/* hover-to-focus toggle: when on, hovering a node dims everything not connected to it. drag to move. */}
+      {graph.showHoverFocus && (
+        <button
+          ref={hoverBtnRef}
+          style={pctStyle(posFor("hover", graph.hoverBtnPos))}
+          onPointerDown={(e) => startDrag(e, hoverBtnRef.current, "hover")}
+          className={`absolute z-10 ${posFor("hover", graph.hoverBtnPos) ? "" : "top-3 right-3"} flex items-center gap-1.5 rounded-xl border backdrop-blur shadow-card px-2.5 py-1.5 text-sm font-medium transition cursor-grab active:cursor-grabbing select-none touch-none ${
+            hoverFocus ? "border-accent bg-accent text-white hover:bg-accent-hover"
+                       : "border-line bg-paper-card/90 text-ink-soft hover:bg-paper-sunk"}`}
+          aria-pressed={hoverFocus}
+          title={hoverFocus ? "Hover focus on — hovering a node dims unconnected ones. Click to turn off, or drag to move."
+                            : "Hover focus off. Click to dim unconnected nodes on hover, or drag to move."}
+          onClick={() => { if (clickGuardRef.current) return; setHoverFocus((v) => !v); }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.2" /><circle cx="12" cy="12" r="8.5" />
+            <path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" strokeLinecap="round" />
+          </svg>
+          Hover focus
+        </button>
+      )}
+
+      {/* zoom / fit / reset controls — drag the grip to reposition */}
+      <div ref={controlsRef}
+           style={pctStyle(posFor("controls", graph.controlsPos))}
+           className={`absolute z-10 ${posFor("controls", graph.controlsPos) ? "" : "bottom-3 right-3"} flex flex-col rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card overflow-hidden`}>
+        <div onPointerDown={(e) => startDrag(e, controlsRef.current, "controls")}
+             className="flex items-center justify-center leading-none py-1 border-b border-line text-ink-faint cursor-grab active:cursor-grabbing select-none touch-none hover:bg-paper-sunk hover:text-ink"
+             title="Drag to move these controls">⠿</div>
         <button className={`${btnGhost} rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom in"
                 onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) * 1.25, duration: 150 })}>+</button>
         <button className={`${btnGhost} rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom out"
@@ -355,8 +460,9 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
         <button className={`${btnGhost} rounded-none px-2.5 py-1.5`} title="Reset layout (space nodes evenly)" onClick={resetLayout}>⊞</button>
       </div>
 
-      {/* the anchored note card (absolute, positioned every frame by the rAF loop above) */}
-      <div ref={cardRef} className={`absolute z-20 ${selected && card ? "block animate-pop" : "hidden"}`} style={{ left: 8, top: 8 }}>
+      {/* the note card. anchored mode: positioned every frame by the rAF loop. fixed mode: pinned here. */}
+      <div ref={cardRef} className={`absolute z-20 ${selected && card ? "block animate-pop" : "hidden"}`}
+           style={graph.cardMode === "fixed" ? pctStyle(posFor("card", graph.cardPos)) : { left: 8, top: 8 }}>
         {card}
       </div>
     </div>
@@ -364,18 +470,23 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
 
   function renderCard() {
     if (!selected) return null;
+    //in fixed mode the card header doubles as a drag handle to reposition the pinned card
+    const fixed = graph.cardMode === "fixed";
+    const headerCls = `flex items-center gap-2 px-3 py-2 border-b border-line ${fixed ? "cursor-grab active:cursor-grabbing select-none touch-none" : ""}`;
+    const onHeaderDown = fixed ? (e: React.PointerEvent) => startDrag(e, cardRef.current, "card") : undefined;
     if (selected.kind === "context") {
       const ctx = contexts[selected.id];
       if (!ctx) return null;
       const submit = () => { if (noteText.trim()) { onAddPoint(selected.id, noteText.trim()); setNoteText(""); } };
       return (
         <div className="w-72 max-h-[60%] flex flex-col rounded-xl border border-line bg-paper-card shadow-pop overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+          <div className={headerCls} onPointerDown={onHeaderDown}>
             <span className="w-3 h-3 rounded-full shrink-0" style={{ background: colorFor(ctx.type, typeColors) }} />
             <strong className="truncate">{ctx.title}</strong>
             {typeLabel(ctx.type) && <span className="text-xs text-ink-faint">{typeLabel(ctx.type)}</span>}
             <span className="flex-1" />
-            <button className="text-ink-faint hover:text-ink transition leading-none text-lg" onClick={() => onSelect(null)} aria-label="Close">×</button>
+            <button className="text-ink-faint hover:text-ink transition leading-none text-lg" onClick={() => onSelect(null)}
+                    onPointerDown={(e) => e.stopPropagation()} aria-label="Close">×</button>
           </div>
           <ul className="px-4 py-2 space-y-1.5 text-sm overflow-auto">
             {(ctx.points || []).map((p, i) => (
@@ -399,10 +510,11 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     const toT = contexts[rel.to]?.title || rel.to;
     return (
       <div className="w-72 max-h-[60%] flex flex-col rounded-xl border border-line bg-paper-card shadow-pop overflow-hidden">
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+        <div className={headerCls} onPointerDown={onHeaderDown}>
           <strong className="truncate text-sm">{fromT} {rel.directed === false ? "↔" : "→"} {toT}</strong>
           <span className="flex-1" />
-          <button className="text-ink-faint hover:text-ink transition leading-none text-lg" onClick={() => onSelect(null)} aria-label="Close">×</button>
+          <button className="text-ink-faint hover:text-ink transition leading-none text-lg" onClick={() => onSelect(null)}
+                  onPointerDown={(e) => e.stopPropagation()} aria-label="Close">×</button>
         </div>
         {rel.label && <div className="px-4 pt-2 text-sm font-medium text-accent-hover">{rel.label}</div>}
         <ul className="px-4 py-2 space-y-1.5 text-sm overflow-auto">

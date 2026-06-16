@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { btn, btnAccent, input } from "./ui";
-import { DEFAULT_THEME, type Theme } from "./theme";
+import { DEFAULT_THEME, DEFAULT_GRAPH, normalizeGraph, type Theme, type GraphPrefs, type CardMode, type CardSide } from "./theme";
 import { downloadJson, readJsonFile } from "./files";
 import { loadTypeColors, saveTypeColors } from "./typeColors";
 import type { User } from "./types";
@@ -14,7 +14,7 @@ export default function Settings({ me, theme, onThemeChange, onAccountChanged, o
   me: User; theme: Theme;
   onThemeChange: (t: Theme) => void; onAccountChanged: () => void; onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"appearance" | "data" | "account">("appearance");
+  const [tab, setTab] = useState<"appearance" | "graph" | "data" | "account">("appearance");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -26,6 +26,7 @@ export default function Settings({ me, theme, onThemeChange, onAccountChanged, o
 
   const tabs = [
     { id: "appearance", label: "Appearance" },
+    { id: "graph", label: "Graph" },
     { id: "data", label: "Import / export" },
     { id: "account", label: me.is_admin ? "Account & users" : "Account" },
   ] as const;
@@ -60,6 +61,7 @@ export default function Settings({ me, theme, onThemeChange, onAccountChanged, o
 
         <div className="p-5 flex flex-col gap-7">
           {tab === "appearance" && <Appearance theme={theme} set={set} onLogoFile={onLogoFile} />}
+          {tab === "graph" && <GraphSettings theme={theme} set={set} />}
           {tab === "data" && <DataSection theme={theme} onThemeChange={onThemeChange} />}
           {tab === "account" && <Account onChanged={onAccountChanged} />}
           {tab === "account" && me.is_admin && <Users />}
@@ -135,6 +137,65 @@ function Appearance({ theme, set, onLogoFile }: {
   );
 }
 
+//a compact segmented control (one choice highlighted)
+function Seg({ value, onChange, options }: {
+  value: string; onChange: (v: string) => void; options: [string, string][];
+}) {
+  return (
+    <div className="flex flex-wrap gap-1 p-0.5 rounded-lg border border-line bg-paper-sunk">
+      {options.map(([v, label]) => (
+        <button key={v} onClick={() => onChange(v)}
+                className={`px-2.5 py-1 rounded-md text-sm font-medium transition ${
+                  value === v ? "bg-paper-card text-ink shadow-card" : "text-ink-soft hover:text-ink"}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function GraphSettings({ theme, set }: { theme: Theme; set: (p: Partial<Theme>) => void }) {
+  const g = theme.graph;
+  const setG = (patch: Partial<GraphPrefs>) => set({ graph: { ...g, ...patch } });
+  const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+  const sides: CardSide[] = ["left", "right", "above", "below"];
+
+  return (
+    <Section title="Graph">
+      <label className="flex items-center gap-2.5 cursor-pointer">
+        <input type="checkbox" checked={g.showHoverFocus} className="h-4 w-4 accent-accent cursor-pointer"
+               onChange={(e) => setG({ showHoverFocus: e.target.checked })} />
+        <span className="text-sm">Show the hover focus button</span>
+      </label>
+      <p className="text-xs text-ink-faint -mt-1.5">
+        The hover focus button toggles whether hovering a node dims everything not connected to it. When shown,
+        drag it anywhere on the graph to reposition it.
+      </p>
+
+      <Row label="Info card">
+        <Seg value={g.cardMode} onChange={(v) => setG({ cardMode: v as CardMode })}
+             options={[["anchored", "Next to node"], ["fixed", "Fixed spot"]]} />
+      </Row>
+      {g.cardMode === "anchored" ? (
+        <Row label="Card side">
+          <Seg value={g.cardSide} onChange={(v) => setG({ cardSide: v as CardSide })}
+               options={sides.map((s) => [s, cap(s)] as [string, string])} />
+        </Row>
+      ) : (
+        <p className="text-xs text-ink-faint">On the graph, drag the card by its title bar to pin it where you want.</p>
+      )}
+
+      <p className="text-xs text-ink-faint">
+        Tip: on the graph you can also drag the zoom / fit / grid controls (by their <span className="font-mono">⠿</span> grip)
+        to move them. Every graph setting here is saved and travels with your exported appearance config, so you can share your setup.
+      </p>
+      <div>
+        <button className={btn} onClick={() => set({ graph: { ...DEFAULT_GRAPH } })}>Reset graph layout</button>
+      </div>
+    </Section>
+  );
+}
+
 function DataSection({ theme, onThemeChange }: { theme: Theme; onThemeChange: (t: Theme) => void }) {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -145,7 +206,7 @@ function DataSection({ theme, onThemeChange }: { theme: Theme; onThemeChange: (t
     setMsg(null);
     try {
       const data = await readJsonFile<{ theme?: Partial<Theme>; typeColors?: Record<string, string> }>(file);
-      if (data.theme) onThemeChange({ ...DEFAULT_THEME, ...data.theme });
+      if (data.theme) onThemeChange({ ...DEFAULT_THEME, ...data.theme, graph: normalizeGraph(data.theme.graph) });
       if (data.typeColors && typeof data.typeColors === "object") saveTypeColors(data.typeColors);
       setMsg({ ok: true, text: "appearance imported" });
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }

@@ -2,20 +2,51 @@
 //scrub colours and set a custom title/logo for the top-left. applied by writing CSS variables that
 //the tailwind tokens (see tailwind.config.js) and the scrubber css read.
 
+//where a clicked node's info card appears: anchored to the node (on a chosen side) or pinned to a
+//spot the user dragged it to. button positions are fractions (0..1) of the graph container, or null
+//to sit in the default corner.
+export type CardMode = "anchored" | "fixed";
+export type CardSide = "left" | "right" | "above" | "below";
+export interface XY { x: number; y: number }
+
+export interface GraphPrefs {
+  showHoverFocus: boolean;     //show the hover-to-focus toggle button on the graph
+  cardMode: CardMode;          //node info card: next to the node, or a fixed pinned spot
+  cardSide: CardSide;          //which side of the node (anchored mode)
+  cardPos: XY;                 //pinned spot as a fraction of the container (fixed mode)
+  hoverBtnPos: XY | null;      //custom spot for the hover-focus button (null = top-right corner)
+  controlsPos: XY | null;      //custom spot for the zoom/fit/grid controls (null = bottom-right corner)
+}
+
 export interface Theme {
   accent: string;   //hex
   scrub: string;    //hex
   title: string;
   logo: string | null; //data url
+  graph: GraphPrefs;
 }
 
-export const DEFAULT_THEME: Theme = { accent: "#C2620B", scrub: "#C2620B", title: "Context Creator", logo: null };
+export const DEFAULT_GRAPH: GraphPrefs = {
+  showHoverFocus: true, cardMode: "anchored", cardSide: "right",
+  cardPos: { x: 0.05, y: 0.08 }, hoverBtnPos: null, controlsPos: null,
+};
+
+export const DEFAULT_THEME: Theme = {
+  accent: "#C2620B", scrub: "#C2620B", title: "Context Creator", logo: null, graph: DEFAULT_GRAPH,
+};
+
+//fill in any missing graph fields from defaults, so older saved/imported configs still work
+export function normalizeGraph(g?: Partial<GraphPrefs> | null): GraphPrefs {
+  return { ...DEFAULT_GRAPH, ...(g || {}) };
+}
 
 const KEY = "cc-theme";
 
 export function loadTheme(): Theme {
-  try { return { ...DEFAULT_THEME, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; }
-  catch { return { ...DEFAULT_THEME }; }
+  try {
+    const p = JSON.parse(localStorage.getItem(KEY) || "{}");
+    return { ...DEFAULT_THEME, ...p, graph: normalizeGraph(p.graph) };
+  } catch { return { ...DEFAULT_THEME }; }
 }
 export function saveTheme(t: Theme) {
   try { localStorage.setItem(KEY, JSON.stringify(t)); } catch { /* ignore */ }

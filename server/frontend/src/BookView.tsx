@@ -7,9 +7,12 @@ import DetailPanel from "./DetailPanel";
 import { btn } from "./ui";
 import { loadTypeColors, saveTypeColors } from "./typeColors";
 import { downloadJson, readJsonFile, slug } from "./files";
+import type { GraphPrefs } from "./theme";
 import type { Doc, Selected } from "./types";
 
-export default function BookView({ bookId, onBack }: { bookId: string; onBack: () => void }) {
+export default function BookView({ bookId, onBack, graph, onGraphChange }: {
+  bookId: string; onBack: () => void; graph: GraphPrefs; onGraphChange: (g: GraphPrefs) => void;
+}) {
   const [doc, setDoc] = useState<Doc | null>(null);
   const [tab, setTab] = useState<"graph" | "browse">("graph");
   const [scrub, setScrub] = useState(1); //0..1 narrative progress; 1 = show everything
@@ -176,7 +179,8 @@ export default function BookView({ bookId, onBack }: { bookId: string; onBack: (
         {tab === "graph" ? (
           <Graph doc={doc} scrub={scrub} selected={selected} onSelect={setSelected}
                  hiddenTypes={hiddenTypes} onToggleType={toggleType} typeColors={typeColors} onSetTypeColor={setTypeColor}
-                 onAddPoint={addPoint} onEditPoint={editPoint} onMoveNodes={commitPositions} />
+                 onAddPoint={addPoint} onEditPoint={editPoint} onMoveNodes={commitPositions}
+                 graph={graph} onGraphChange={onGraphChange} />
         ) : (
           <div className="h-full flex gap-3 items-start overflow-hidden">
             <div className="flex-1 min-w-0 h-full overflow-auto pr-1">
