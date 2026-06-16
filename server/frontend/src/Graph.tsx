@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import cytoscape, { type Core } from "cytoscape";
 import cola from "cytoscape-cola";
 import { colorFor, contextProgress, pointText, pointProgress, typeLabel, TYPE_LABELS } from "./model";
@@ -65,6 +65,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   const hoverFocusRef = useRef(true);                    //whether hovering a node spotlights its neighbourhood
   const hoverBtnRef = useRef<HTMLButtonElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
+  const legendRef = useRef<HTMLDivElement>(null);
   const clickGuardRef = useRef(false);                   //set right after a drag so the trailing click is ignored
   const graphRef = useRef(graph);                        //latest prefs, read inside the rAF card-placement loop
   useEffect(() => { onMoveRef.current = onMoveNodes; }, [onMoveNodes]);
@@ -72,14 +73,16 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
 
   const [noteText, setNoteText] = useState("");
   const [legendOpen, setLegendOpen] = useState(true);
-  const [hoverFocus, setHoverFocus] = useState(true);
+  const [isFs, setIsFs] = useState(false);               //graph filling the whole screen (fullscreen api)
+  const [legendBottom, setLegendBottom] = useState<number | null>(null); //px below container top where the legend ends
   //which overlay is being dragged + its live fractional position, so it moves under the cursor before
   //we commit the final spot to the (persisted, exportable) config on drop
-  const [dragging, setDragging] = useState<{ which: "hover" | "controls" | "card"; p: XY } | null>(null);
+  type Which = "hover" | "controls" | "card" | "legend";
+  const [dragging, setDragging] = useState<{ which: Which; p: XY } | null>(null);
 
-  //drag an overlay (hover button / controls / card) to a new spot in the container. distinguishes a
-  //real drag from a click via a small movement threshold; commits to the shared config on drop.
-  function startDrag(e: React.PointerEvent, el: HTMLElement | null, which: "hover" | "controls" | "card") {
+  //drag an overlay (hover button / controls / card / legend) to a new spot in the container. distinguishes
+  //a real drag from a click via a small movement threshold; commits to the shared config on drop.
+  function startDrag(e: React.PointerEvent, el: HTMLElement | null, which: Which) {
     const box = containerRef.current;
     if (!box || !el) return;
     e.preventDefault();
@@ -108,6 +111,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
       const g = graphRef.current;
       if (which === "hover") onGraphChange({ ...g, hoverBtnPos: last });
       else if (which === "controls") onGraphChange({ ...g, controlsPos: last });
+      else if (which === "legend") onGraphChange({ ...g, legendPos: last });
       else onGraphChange({ ...g, cardPos: last });
     };
     window.addEventListener("pointermove", onMove);
@@ -115,10 +119,27 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   }
   //resolve the on-screen spot for an overlay: the live drag position if it's the one moving, else the
   //saved position (a fraction), or null to fall back to the default corner css
-  const posFor = (which: "hover" | "controls" | "card", saved: XY | null): XY | null =>
+  const posFor = (which: Which, saved: XY | null): XY | null =>
     dragging?.which === which ? dragging.p : saved;
   const pctStyle = (p: XY | null): React.CSSProperties | undefined =>
     p ? { left: `${p.x * 100}%`, top: `${p.y * 100}%`, right: "auto", bottom: "auto" } : undefined;
+
+  //true fullscreen: blow the graph container up to fill the whole screen via the fullscreen api
+  function toggleFullscreen() {
+    const box = containerRef.current; if (!box) return;
+    if (document.fullscreenElement) void document.exitFullscreen?.();
+    else void box.requestFullscreen?.();
+  }
+  //track fullscreen state and resize/refit cytoscape when the container's size jumps
+  useEffect(() => {
+    const onFs = () => {
+      setIsFs(!!document.fullscreenElement);
+      const cy = cyRef.current; if (!cy) return;
+      requestAnimationFrame(() => { cy.resize(); cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 200 }); });
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
 
   //collect every node's position and hand it up to be saved. `record` marks a user move (undoable);
   //the auto-save after an initial arrange passes false so it doesn't create an undo step.
@@ -213,11 +234,13 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   //sync refs + repaint when scrub/filter change (no relayout)
   useEffect(() => { scrubRef.current = scrub; refresh(); }, [scrub]);
   useEffect(() => { hiddenRef.current = hiddenTypes; refresh(); }, [hiddenTypes]);
-  //when hover-focus is switched off, drop any live hover spotlight back to the selection's (or none)
+  //hover focus on/off lives in the saved config now; mirror it into the ref the hover handler reads, and
+  //when it's switched off drop any live hover spotlight back to the selection's (or none)
   useEffect(() => {
-    hoverFocusRef.current = hoverFocus;
-    if (!hoverFocus) { focusRef.current = selFocusRef.current; refresh(); }
-  }, [hoverFocus]);
+    hoverFocusRef.current = graph.hoverFocusOn;
+    if (!graph.hoverFocusOn) { focusRef.current = selFocusRef.current; refresh(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph.hoverFocusOn]);
 
   //recolour nodes in place when the user changes a type's colour (node + halo read data(color))
   useEffect(() => {
@@ -374,20 +397,44 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     ...(counts.unset ? ["unset"] : []),
   ];
 
+  //measure where the filter ends so the hover button can default to sitting just beneath it. only when
+  //the filter is shown and at its default (un-dragged) top-left spot; otherwise the hover button uses
+  //its own corner default. recompute when the filter's size/visibility changes.
+  const legendShownDefault = present.length > 0 && graph.showLegend && !graph.legendPos;
+  useLayoutEffect(() => {
+    const box = containerRef.current, leg = legendRef.current;
+    if (!legendShownDefault || !box || !leg) { setLegendBottom(null); return; }
+    const b = leg.getBoundingClientRect(), c = box.getBoundingClientRect();
+    setLegendBottom(b.bottom - c.top);
+  }, [legendShownDefault, legendOpen, present.length, isFs]);
+
+  //resolved placement for the hover-focus button: a dragged/saved spot wins, else just under the filter
+  //(top-left) when we have its measured bottom, else the top-left corner
+  const hoverSaved = posFor("hover", graph.hoverBtnPos);
+  const hoverUnderFilter = !hoverSaved && legendBottom != null;
+  const hoverStyle: React.CSSProperties | undefined = hoverSaved
+    ? pctStyle(hoverSaved)
+    : hoverUnderFilter ? { left: 12, top: legendBottom! + 8, right: "auto", bottom: "auto" } : undefined;
+  const hoverCorner = hoverSaved || hoverUnderFilter ? "" : "top-3 left-3";
+
   const card = renderCard();
 
   return (
     <div ref={containerRef} className="relative w-full h-full rounded-xl border border-line overflow-hidden">
       <div ref={canvasRef} className="absolute inset-0 graph-canvas" />
 
-      {/* legend doubles as a type filter (click a row) + colour picker (click the swatch). collapsible. */}
-      {present.length > 0 && (
+      {/* legend doubles as a type filter (click a row) + colour picker (click the swatch). collapsible,
+          hideable from settings, and draggable (panel by its header, pill as a whole). */}
+      {present.length > 0 && graph.showLegend && (
         legendOpen ? (
-          <div className="absolute top-3 left-3 z-10 rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card p-2 w-[200px]">
-            <div className="flex items-center gap-1 px-1.5 pb-1.5">
+          <div ref={legendRef}
+               style={pctStyle(posFor("legend", graph.legendPos))}
+               className={`absolute z-10 ${posFor("legend", graph.legendPos) ? "" : "top-3 left-3"} rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card p-2 w-[200px]`}>
+            <div className="flex items-center gap-1 px-1.5 pb-1.5 cursor-grab active:cursor-grabbing select-none touch-none"
+                 onPointerDown={(e) => startDrag(e, legendRef.current, "legend")} title="Drag to move">
               <span className="flex-1 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Types · filter</span>
-              <button className="text-ink-faint hover:text-ink transition text-sm leading-none px-1" title="Hide legend"
-                      onClick={() => setLegendOpen(false)}>‹</button>
+              <button className="text-ink-faint hover:text-ink transition text-sm leading-none px-1" title="Collapse"
+                      onPointerDown={(e) => e.stopPropagation()} onClick={() => setLegendOpen(false)}>‹</button>
             </div>
             <div className="flex flex-col gap-0.5">
               {present.map((t) => {
@@ -418,8 +465,11 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
             </div>
           </div>
         ) : (
-          <button className="absolute top-3 left-3 z-10 rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card px-2.5 py-1.5 text-sm font-medium hover:bg-paper-sunk transition"
-                  title="Show legend" onClick={() => setLegendOpen(true)}>Types ›</button>
+          <button style={pctStyle(posFor("legend", graph.legendPos))}
+                  onPointerDown={(e) => startDrag(e, e.currentTarget, "legend")}
+                  className={`absolute z-10 ${posFor("legend", graph.legendPos) ? "" : "top-3 left-3"} rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card px-2.5 py-1.5 text-sm font-medium hover:bg-paper-sunk transition cursor-grab active:cursor-grabbing select-none touch-none`}
+                  title="Show filter (drag to move)"
+                  onClick={() => { if (clickGuardRef.current) return; setLegendOpen(true); }}>Types ›</button>
         )
       )}
 
@@ -427,15 +477,15 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
       {graph.showHoverFocus && (
         <button
           ref={hoverBtnRef}
-          style={pctStyle(posFor("hover", graph.hoverBtnPos))}
+          style={hoverStyle}
           onPointerDown={(e) => startDrag(e, hoverBtnRef.current, "hover")}
-          className={`absolute z-10 ${posFor("hover", graph.hoverBtnPos) ? "" : "top-3 right-3"} flex items-center gap-1.5 rounded-xl border backdrop-blur shadow-card px-2.5 py-1.5 text-sm font-medium transition cursor-grab active:cursor-grabbing select-none touch-none ${
-            hoverFocus ? "border-accent bg-accent text-white hover:bg-accent-hover"
-                       : "border-line bg-paper-card/90 text-ink-soft hover:bg-paper-sunk"}`}
-          aria-pressed={hoverFocus}
-          title={hoverFocus ? "Hover focus on — hovering a node dims unconnected ones. Click to turn off, or drag to move."
-                            : "Hover focus off. Click to dim unconnected nodes on hover, or drag to move."}
-          onClick={() => { if (clickGuardRef.current) return; setHoverFocus((v) => !v); }}>
+          className={`absolute z-10 ${hoverCorner} flex items-center gap-1.5 rounded-xl border backdrop-blur shadow-card px-2.5 py-1.5 text-sm font-medium transition cursor-grab active:cursor-grabbing select-none touch-none ${
+            graph.hoverFocusOn ? "border-accent bg-accent text-white hover:bg-accent-hover"
+                               : "border-line bg-paper-card/90 text-ink-soft hover:bg-paper-sunk"}`}
+          aria-pressed={graph.hoverFocusOn}
+          title={graph.hoverFocusOn ? "Hover focus on — hovering a node dims unconnected ones. Click to turn off, or drag to move."
+                                    : "Hover focus off. Click to dim unconnected nodes on hover, or drag to move."}
+          onClick={() => { if (clickGuardRef.current) return; onGraphChange({ ...graph, hoverFocusOn: !graph.hoverFocusOn }); }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <circle cx="12" cy="12" r="3.2" /><circle cx="12" cy="12" r="8.5" />
             <path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" strokeLinecap="round" />
@@ -444,21 +494,31 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
         </button>
       )}
 
-      {/* zoom / fit / reset controls — drag the grip to reposition */}
-      <div ref={controlsRef}
-           style={pctStyle(posFor("controls", graph.controlsPos))}
-           className={`absolute z-10 ${posFor("controls", graph.controlsPos) ? "" : "bottom-3 right-3"} flex flex-col rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card overflow-hidden`}>
-        <div onPointerDown={(e) => startDrag(e, controlsRef.current, "controls")}
-             className="flex items-center justify-center leading-none py-1 border-b border-line text-ink-faint cursor-grab active:cursor-grabbing select-none touch-none hover:bg-paper-sunk hover:text-ink"
-             title="Drag to move these controls">⠿</div>
-        <button className={`${btnGhost} rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom in"
-                onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) * 1.25, duration: 150 })}>+</button>
-        <button className={`${btnGhost} rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom out"
-                onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) / 1.25, duration: 150 })}>−</button>
-        <button className={`${btnGhost} rounded-none px-2.5 py-1.5 border-b border-line`} title="Fit to view"
-                onClick={() => { const cy = cyRef.current; if (cy) cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 300 }); }}>⤢</button>
-        <button className={`${btnGhost} rounded-none px-2.5 py-1.5`} title="Reset layout (space nodes evenly)" onClick={resetLayout}>⊞</button>
-      </div>
+      {/* zoom / fit / reset / fullscreen controls — drag the grip to reposition, hideable from settings */}
+      {graph.showControls && (
+        <div ref={controlsRef}
+             style={pctStyle(posFor("controls", graph.controlsPos))}
+             className={`absolute z-10 ${posFor("controls", graph.controlsPos) ? "" : "bottom-3 left-3"} flex flex-col rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card overflow-hidden`}>
+          <div onPointerDown={(e) => startDrag(e, controlsRef.current, "controls")}
+               className="flex items-center justify-center leading-none py-1 border-b border-line text-ink-faint cursor-grab active:cursor-grabbing select-none touch-none hover:bg-paper-sunk hover:text-ink"
+               title="Drag to move these controls">⠿</div>
+          <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom in"
+                  onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) * 1.25, duration: 150 })}>+</button>
+          <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom out"
+                  onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) / 1.25, duration: 150 })}>−</button>
+          <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Fit to view"
+                  onClick={() => { const cy = cyRef.current; if (cy) cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 300 }); }}>⤢</button>
+          <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Reset layout (space nodes evenly)" onClick={resetLayout}>⊞</button>
+          <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5`} title={isFs ? "Exit fullscreen" : "Fullscreen graph"}
+                  aria-label={isFs ? "Exit fullscreen" : "Fullscreen graph"} onClick={toggleFullscreen}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="mx-auto">
+              {isFs
+                ? <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" />
+                : <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />}
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* the note card. anchored mode: positioned every frame by the rAF loop. fixed mode: pinned here. */}
       <div ref={cardRef} className={`absolute z-20 ${selected && card ? "block animate-pop" : "hidden"}`}

@@ -160,16 +160,27 @@ function GraphSettings({ theme, set }: { theme: Theme; set: (p: Partial<Theme>) 
   const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
   const sides: CardSide[] = ["left", "right", "above", "below"];
 
+  const Check = ({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) => (
+    <label className="flex items-center gap-2.5 cursor-pointer">
+      <input type="checkbox" checked={on} className="h-4 w-4 accent-accent cursor-pointer"
+             onChange={(e) => onChange(e.target.checked)} />
+      <span className="text-sm">{label}</span>
+    </label>
+  );
+
   return (
     <Section title="Graph">
-      <label className="flex items-center gap-2.5 cursor-pointer">
-        <input type="checkbox" checked={g.showHoverFocus} className="h-4 w-4 accent-accent cursor-pointer"
-               onChange={(e) => setG({ showHoverFocus: e.target.checked })} />
-        <span className="text-sm">Show the hover focus button</span>
-      </label>
+      <div className="flex flex-col gap-2.5">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5">
+          <Check on={g.showHoverFocus} onChange={(v) => setG({ showHoverFocus: v })} label="Show the hover focus button" />
+          <Check on={g.hoverFocusOn} onChange={(v) => setG({ hoverFocusOn: v })} label="Hover focus on (dim unconnected)" />
+        </div>
+        <Check on={g.showControls} onChange={(v) => setG({ showControls: v })} label="Show the zoom / fit / grid / fullscreen controls" />
+        <Check on={g.showLegend} onChange={(v) => setG({ showLegend: v })} label="Show the type filter / legend" />
+      </div>
       <p className="text-xs text-ink-faint -mt-1.5">
-        The hover focus button toggles whether hovering a node dims everything not connected to it. When shown,
-        drag it anywhere on the graph to reposition it.
+        "Hover focus on" dims everything not connected to the node you hover, toggle it here even if you hide its
+        button. Everything you keep visible can be dragged around the graph to sit exactly where you want.
       </p>
 
       <Row label="Info card">
@@ -186,8 +197,10 @@ function GraphSettings({ theme, set }: { theme: Theme; set: (p: Partial<Theme>) 
       )}
 
       <p className="text-xs text-ink-faint">
-        Tip: on the graph you can also drag the zoom / fit / grid controls (by their <span className="font-mono">⠿</span> grip)
-        to move them. Every graph setting here is saved and travels with your exported appearance config, so you can share your setup.
+        Tip: on the graph, drag the controls cluster by its <span className="font-mono">⠿</span> grip, the filter by its
+        header, and the hover button by tapping and dragging. The controls cluster also has a fullscreen button that fills
+        the whole screen with the graph. Every graph setting here is saved and travels with your exported appearance config,
+        so you can share your exact setup.
       </p>
       <div>
         <button className={btn} onClick={() => set({ graph: { ...DEFAULT_GRAPH } })}>Reset graph layout</button>

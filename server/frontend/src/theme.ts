@@ -10,12 +10,16 @@ export type CardSide = "left" | "right" | "above" | "below";
 export interface XY { x: number; y: number }
 
 export interface GraphPrefs {
+  hoverFocusOn: boolean;       //hovering a node dims everything not connected to it
   showHoverFocus: boolean;     //show the hover-to-focus toggle button on the graph
+  showControls: boolean;       //show the zoom/fit/grid/fullscreen controls cluster
+  showLegend: boolean;         //show the type filter / legend panel
   cardMode: CardMode;          //node info card: next to the node, or a fixed pinned spot
   cardSide: CardSide;          //which side of the node (anchored mode)
   cardPos: XY;                 //pinned spot as a fraction of the container (fixed mode)
   hoverBtnPos: XY | null;      //custom spot for the hover-focus button (null = top-right corner)
   controlsPos: XY | null;      //custom spot for the zoom/fit/grid controls (null = bottom-right corner)
+  legendPos: XY | null;        //custom spot for the type filter / legend (null = top-left corner)
 }
 
 export interface Theme {
@@ -27,8 +31,8 @@ export interface Theme {
 }
 
 export const DEFAULT_GRAPH: GraphPrefs = {
-  showHoverFocus: true, cardMode: "anchored", cardSide: "right",
-  cardPos: { x: 0.05, y: 0.08 }, hoverBtnPos: null, controlsPos: null,
+  hoverFocusOn: true, showHoverFocus: true, showControls: true, showLegend: true, cardMode: "anchored", cardSide: "right",
+  cardPos: { x: 0.05, y: 0.08 }, hoverBtnPos: null, controlsPos: null, legendPos: null,
 };
 
 export const DEFAULT_THEME: Theme = {
