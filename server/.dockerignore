@@ -1,0 +1,12 @@
+# keep the build context small and free of local-only / secret stuff
+.venv
+__pycache__
+*.pyc
+.env
+secret_key
+*.db
+contextcreator.db
+frontend/node_modules
+frontend/dist
+app/web
+.DS_Store
