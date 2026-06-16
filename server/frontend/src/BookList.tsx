@@ -14,20 +14,27 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
     return () => { alive = false; clearInterval(t); };
   }, []);
 
-  if (!books) return <p className="text-gray-500">Loading…</p>;
+  if (!books) return <p className="text-ink-faint">Loading…</p>;
   if (books.length === 0) {
-    return <p className="text-gray-500">No books synced yet. Sync from KOReader and they'll show up here.</p>;
+    return (
+      <div className="rounded-xl border border-dashed border-line-strong bg-paper-card p-8 text-center">
+        <p className="font-medium">No books synced yet</p>
+        <p className="text-sm text-ink-faint mt-1">Sync from KOReader and your books will show up here.</p>
+      </div>
+    );
   }
   return (
-    <ul className="divide-y divide-gray-100">
-      {books.map((b) => (
-        <li key={b.book_id} className="py-2">
-          <button className="text-blue-700 hover:underline" onClick={() => onOpen(b.book_id)}>
-            {b.title || b.book_id}
+    <div>
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-faint mb-3">Your books</h2>
+      <div className="grid gap-2.5 sm:grid-cols-2">
+        {books.map((b) => (
+          <button key={b.book_id} onClick={() => onOpen(b.book_id)}
+                  className="group text-left rounded-xl border border-line bg-paper-card p-4 shadow-card transition hover:shadow-pop hover:-translate-y-0.5 hover:border-accent-ring">
+            <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
+            {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
           </button>
-          {b.authors ? <span className="text-gray-500"> — {b.authors}</span> : null}
-        </li>
-      ))}
-    </ul>
+        ))}
+      </div>
+    </div>
   );
 }

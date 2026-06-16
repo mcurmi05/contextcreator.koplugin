@@ -23,6 +23,12 @@ class PointIn(BaseModel):
     text: str
 
 
+class PointEdit(BaseModel):
+    text: str
+    id: str | None = None
+    index: int | None = None
+
+
 def _get_row(session, user, book_id) -> Book:
     row = session.exec(
         select(Book).where(Book.user_id == user.id, Book.book_id == book_id)
@@ -70,4 +76,13 @@ def add_point(book_id: str, key: str, body: PointIn, user: User = Depends(get_cu
     doc = json.loads(row.doc_json)
     if not docops.add_point(doc, key, body.text):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="context not found or empty text")
+    return _save(session, row, doc)
+
+
+@router.patch("/books/{book_id}/contexts/{key}/points")
+def edit_point(book_id: str, key: str, body: PointEdit, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    row = _get_row(session, user, book_id)
+    doc = json.loads(row.doc_json)
+    if not docops.edit_point(doc, key, body.text, body.id, body.index):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="point not found or empty text")
     return _save(session, row, doc)

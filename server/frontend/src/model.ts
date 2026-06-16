@@ -5,7 +5,7 @@ export const TYPE_LABELS: Record<string, string> = {
   character: "Character", place: "Location", object: "Object", concept: "Concept",
 };
 const BUILTIN_COLORS: Record<string, string> = {
-  character: "#4e79a7", place: "#59a14f", object: "#e15759", concept: "#b07aa1", unset: "#9aa0a6",
+  character: "#4F46E5", place: "#0E9F6E", object: "#E11D48", concept: "#7C3AED", unset: "#A8A29E",
 };
 
 export function typeLabel(t?: string): string {
@@ -17,13 +17,20 @@ export function isCustomType(t?: string): boolean {
   return !!t && t !== "unset" && !TYPE_LABELS[t];
 }
 
-//colour for a type: fixed for built-ins, a stable hue for custom types, grey for unset
-export function colorFor(t?: string): string {
+//colour for a type. a user override (set via the legend) wins; then fixed built-ins, then a stable
+//hue for custom types, then grey for unset.
+export function colorFor(t?: string, overrides?: Record<string, string>): string {
+  if (t && overrides && overrides[t]) return overrides[t];
   if (t && BUILTIN_COLORS[t]) return BUILTIN_COLORS[t];
   if (!t || t === "unset") return BUILTIN_COLORS.unset;
   let h = 0;
   for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) % 360;
   return `hsl(${h}, 55%, 45%)`;
+}
+
+//the built-in/computed default for a type, ignoring overrides (so "reset" can restore it)
+export function defaultColorFor(t?: string): string {
+  return colorFor(t);
 }
 
 export function pointText(p: Point): string {

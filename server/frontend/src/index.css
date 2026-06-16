@@ -1,3 +1,42 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    font-feature-settings: "tnum" 0;
+  }
+}
+
+@layer components {
+  /* faint dot grid behind the graph, so the canvas reads as a workspace not a void */
+  .graph-canvas {
+    background-color: #FAF7F2;
+    background-image: radial-gradient(rgba(28, 25, 23, 0.07) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  /* the narrative scrubber: themed track + thumb across browsers */
+  .scrubber { @apply w-full appearance-none bg-transparent cursor-pointer; }
+  .scrubber::-webkit-slider-runnable-track { height: 4px; border-radius: 9999px; background: transparent; }
+  .scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; margin-top: -7px; border-radius: 9999px;
+    background: #C2620B; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(28,25,23,0.3);
+    transition: transform 150ms ease;
+  }
+  .scrubber:hover::-webkit-slider-thumb { transform: scale(1.12); }
+  .scrubber::-moz-range-thumb {
+    width: 16px; height: 16px; border-radius: 9999px;
+    background: #C2620B; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(28,25,23,0.3);
+  }
+}
+
+/* honor reduced-motion: kill the decorative entrance animations */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}

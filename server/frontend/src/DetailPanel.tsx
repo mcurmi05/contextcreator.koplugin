@@ -1,63 +1,69 @@
 import { useState } from "react";
-import { pointText, pointProgress, typeLabel, relArrow } from "./model";
-import { card, btn, input } from "./ui";
-import type { Doc, Selected } from "./types";
+import { pointText, pointProgress, typeLabel, colorFor, relArrow } from "./model";
+import PointItem from "./PointItem";
+import type { Doc, Point, Selected } from "./types";
 
-//shows the dot points for the selected context or relationship; for a context you can add one.
-export default function DetailPanel({ doc, selected, scrub, onAddPoint, onClose }: {
-  doc: Doc; selected: Selected; scrub: number;
-  onAddPoint: (key: string, text: string) => void; onClose: () => void;
+const pointRef = (p: Point, i: number) => ({ id: typeof p === "object" ? p.id : undefined, index: i });
+
+//side panel for the browse view: notes for the selected context (with an add box) or relationship.
+export default function DetailPanel({ doc, selected, scrub, typeColors, onAddPoint, onEditPoint, onClose }: {
+  doc: Doc; selected: Selected; scrub: number; typeColors: Record<string, string>;
+  onAddPoint: (key: string, text: string) => void;
+  onEditPoint: (key: string, ref: { id?: string; index: number }, text: string) => void;
+  onClose: () => void;
 }) {
   const [text, setText] = useState("");
+  const shell = "rounded-xl border border-line bg-paper-card shadow-card";
 
   if (!selected) {
-    return <div className={`${card} w-[300px] shrink-0 text-gray-500`}>Select a context or relationship to read its notes.</div>;
+    return <div className={`${shell} p-4 text-ink-faint text-sm`}>Select a context to read its notes.</div>;
   }
 
   if (selected.kind === "context") {
     const ctx = doc.contexts[selected.id];
-    if (!ctx) return <div className={`${card} w-[300px] shrink-0 text-gray-500`}>(no longer here)</div>;
+    if (!ctx) return <div className={`${shell} p-4 text-ink-faint text-sm`}>(no longer here)</div>;
     const submit = () => { if (text.trim()) { onAddPoint(selected.id, text.trim()); setText(""); } };
     return (
-      <div className={`${card} w-[300px] shrink-0`}>
-        <div className="flex items-center gap-2">
-          <strong>{ctx.title}</strong>
-          <span className="text-gray-500 text-sm">{typeLabel(ctx.type)}</span>
+      <div className={`${shell} overflow-hidden`}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-line">
+          <span className="w-3 h-3 rounded-full shrink-0" style={{ background: colorFor(ctx.type, typeColors) }} />
+          <strong className="truncate">{ctx.title}</strong>
+          {typeLabel(ctx.type) && <span className="text-xs text-ink-faint">{typeLabel(ctx.type)}</span>}
           <span className="flex-1" />
-          <button className={btn} onClick={onClose}>×</button>
+          <button className="text-ink-faint hover:text-ink transition text-lg leading-none" onClick={onClose} aria-label="Close">×</button>
         </div>
-        <ul className="list-disc pl-5 my-2 text-sm">
-          {(ctx.points || []).map((p, i) => {
-            const pr = pointProgress(p);
-            return <li key={i} className={pr != null && pr > scrub ? "opacity-50" : ""}>{pointText(p)}</li>;
-          })}
-          {(!ctx.points || ctx.points.length === 0) && <li className="text-gray-400 list-none">no dot points</li>}
+        <ul className="px-4 py-3 space-y-1.5 text-sm">
+          {(ctx.points || []).map((p, i) => (
+            <PointItem key={i} text={pointText(p)} dim={(pointProgress(p) ?? -1) > scrub} editable
+                       onSave={(t) => onEditPoint(selected.id, pointRef(p, i), t)} />
+          ))}
+          {(!ctx.points || ctx.points.length === 0) && <li className="text-ink-faint italic">no notes yet</li>}
         </ul>
-        <div className="flex gap-2">
-          <input className={`${input} flex-1`} placeholder="add a dot point" value={text}
-                 onChange={(e) => setText(e.target.value)}
-                 onKeyDown={(e) => e.key === "Enter" && submit()} />
-          <button className={btn} onClick={submit}>Add</button>
+        <div className="flex gap-1.5 p-2 border-t border-line bg-paper">
+          <input className="flex-1 px-2.5 py-1.5 rounded-lg border border-line bg-paper-card text-sm focus:outline-none focus:border-accent-ring focus:ring-2 focus:ring-accent-ring/30"
+                 placeholder="add a note…" value={text}
+                 onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+          <button className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition" onClick={submit}>Add</button>
         </div>
       </div>
     );
   }
 
   const rel = (doc.relationships || []).find((r) => r.id === selected.id);
-  if (!rel) return <div className={`${card} w-[300px] shrink-0 text-gray-500`}>(no longer here)</div>;
+  if (!rel) return <div className={`${shell} p-4 text-ink-faint text-sm`}>(no longer here)</div>;
   const fromTitle = doc.contexts[rel.from]?.title || rel.from;
   const toTitle = doc.contexts[rel.to]?.title || rel.to;
   return (
-    <div className={`${card} w-[300px] shrink-0`}>
-      <div className="flex items-center gap-2">
-        <strong>{fromTitle} {relArrow(rel)} {toTitle}</strong>
+    <div className={`${shell} overflow-hidden`}>
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-line">
+        <strong className="truncate text-sm">{fromTitle} {relArrow(rel)} {toTitle}</strong>
         <span className="flex-1" />
-        <button className={btn} onClick={onClose}>×</button>
+        <button className="text-ink-faint hover:text-ink transition text-lg leading-none" onClick={onClose} aria-label="Close">×</button>
       </div>
-      <p className="text-gray-500 text-sm">{rel.label}</p>
-      <ul className="list-disc pl-5 my-2 text-sm">
-        {(rel.points || []).map((p, i) => <li key={i}>{pointText(p)}</li>)}
-        {(!rel.points || rel.points.length === 0) && <li className="text-gray-400 list-none">no dot points</li>}
+      {rel.label && <p className="px-4 pt-2 text-sm font-medium text-accent-hover">{rel.label}</p>}
+      <ul className="px-4 py-3 space-y-1.5 text-sm">
+        {(rel.points || []).map((p, i) => <li key={i} className="flex gap-1.5"><span className="text-accent select-none">•</span><span>{pointText(p)}</span></li>)}
+        {(!rel.points || rel.points.length === 0) && <li className="text-ink-faint italic">no notes on this link</li>}
       </ul>
     </div>
   );

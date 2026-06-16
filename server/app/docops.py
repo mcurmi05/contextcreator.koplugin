@@ -70,3 +70,31 @@ def add_point(doc, key, text):
     doc["tombstones"]["contexts"].pop(key, None)
     doc["updated"] = ts
     return True
+
+
+def edit_point(doc, key, text, point_id=None, index=None):
+    #change a dot point's text in place, keeping its id so the merge treats it as the same point
+    #(a one-sided edit wins by being the merge base; a concurrent device edit churns its own id and
+    #still wins). returns True if a point was found and changed.
+    _normalize(doc)
+    ctx = doc["contexts"].get(key)
+    if not ctx or not text:
+        return False
+    points = ctx.get("points") or []
+    target = None
+    if point_id is not None:
+        target = next((p for p in points if isinstance(p, dict) and p.get("id") == point_id), None)
+    if target is None and index is not None and 0 <= index < len(points):
+        p = points[index]
+        if not isinstance(p, dict):          #upgrade a legacy bare-string point to an object
+            p = {"id": gen_id(), "text": str(p)}
+            points[index] = p
+        target = p
+    if target is None:
+        return False
+    target["text"] = text
+    target.setdefault("id", gen_id())
+    ts = now()
+    ctx["updated"] = ts
+    doc["updated"] = ts
+    return True
