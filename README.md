@@ -73,7 +73,7 @@ You can also bind **Context Creator: view contexts** and **Context Creator: sync
 The two buttons live in KOReader's text selection popup. If a quick long press on a single word jumps **straight to the dictionary**, that's KOReader's default single word behaviour, not the plugin. Two ways to get the buttons:
 
 1. **Select the text**: long press and drag a little to select the word (or a phrase) and release. The selection popup always shows, with the Context Creator buttons in it.
-2. **Change the long press behaviour**: so a single word long press opens the selection popup instead of the dictionary. In KOReader's top menu open the gear (Settings) -> **Taps and gestures**, and set the long press/text selection action to **Ask with popup dialog** rather than going straight to dictionary. Once a long press opens the selection popup, the **Add to context** and **View all contexts** buttons are right there. You can still select dictionary from this pop up menu.
+2. **Change the long press behaviour**: so a single word long press opens the selection popup instead of the dictionary. In KOReader's top menu open the gear (Settings) -> **Taps and gestures**, and set the long press/text selection action to **Ask with popup dialog** rather than going straight to dictionary, and also uncheck **Dictionary on single word selection**. Once a long press opens the selection popup, the **Add to context** and **View all contexts** buttons will showup at the bottom. You can still select dictionary from this pop up menu when you would like to use it.
 
 The plugin registers both buttons into that popup, so anything that opens it (drag select or a long press configured as above) shows them.
 
