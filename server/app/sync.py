@@ -20,6 +20,8 @@ def _normalize(doc):
     doc["contexts"] = doc["contexts"] if isinstance(doc.get("contexts"), dict) else {}
     doc["relationships"] = doc["relationships"] if isinstance(doc.get("relationships"), list) else []
     doc["layout"] = doc["layout"] if isinstance(doc.get("layout"), dict) else {}  #web-set node positions
+    rp = doc.get("reading_progress")  #0..1 fraction the device last read up to
+    doc["reading_progress"] = rp if isinstance(rp, (int, float)) and not isinstance(rp, bool) else None
     t = doc.get("tombstones") if isinstance(doc.get("tombstones"), dict) else {}
     t = dict(t)
     for k in EMPTY_TOMBSTONES:
@@ -36,6 +38,7 @@ def new_doc():
         "contexts": {},
         "relationships": [],
         "layout": {},
+        "reading_progress": None,
         "tombstones": {"contexts": {}, "relationships": {}, "points": {}},
     }
 
@@ -151,6 +154,11 @@ def merge(base, incoming):
     #and drop entries for contexts that no longer exist
     layout = {**incoming.get("layout", {}), **base.get("layout", {})}
     out["layout"] = {k: v for k, v in layout.items() if k in out["contexts"]}
+
+    #reading progress is the device's "where i'm up to": the incoming (device) value wins when present,
+    #otherwise keep what we had so a web-side merge doesn't wipe it
+    inc_rp = incoming.get("reading_progress")
+    out["reading_progress"] = inc_rp if inc_rp is not None else base.get("reading_progress")
 
     out["book"] = _merge_book(base["book"], incoming["book"])
     out["updated"] = max(base.get("updated") or 0, incoming.get("updated") or 0)

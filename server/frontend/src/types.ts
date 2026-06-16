@@ -40,6 +40,7 @@ export interface Doc {
   contexts: Record<string, Context>;
   relationships?: Relationship[];
   layout?: Record<string, NodePos>;   //web-set node positions, keyed by context key
+  reading_progress?: number | null;   //0..1 fraction the device last read up to
   tombstones?: unknown;
 }
 

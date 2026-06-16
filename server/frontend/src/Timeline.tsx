@@ -18,6 +18,10 @@ export default function Timeline({ doc, scrub, onScrub }: {
   const pct = Math.round(scrub * 100);
   const caption = curChapter ? curChapter.title : toc.length ? "Before " + toc[0].title : "Whole book";
 
+  //where the device last read up to (0..1), if it's been synced. shown as a marker and a jump button.
+  const rp = typeof doc.reading_progress === "number"
+    ? Math.max(0, Math.min(1, doc.reading_progress)) : null;
+
   return (
     <div className="rounded-xl border border-line bg-paper-card shadow-card px-4 py-3">
       <div className="flex items-baseline gap-2 mb-2">
@@ -25,6 +29,12 @@ export default function Timeline({ doc, scrub, onScrub }: {
         <strong className="text-sm truncate">{caption}</strong>
         <span className="text-sm text-ink-faint tabular-nums">· {pct}%</span>
         <span className="flex-1" />
+        {rp != null && (
+          <button className={btnGhost} onClick={() => onScrub(rp)} disabled={Math.abs(scrub - rp) < 0.005}
+                  title={`Jump to where you've read to (${Math.round(rp * 100)}%)`}>
+            Jump to current
+          </button>
+        )}
         <button className={btnGhost} onClick={() => onScrub(1)} disabled={scrub >= 1}>Show all</button>
       </div>
 
@@ -40,6 +50,11 @@ export default function Timeline({ doc, scrub, onScrub }: {
         {toc.map((c, i) => (
           <div key={i} className="absolute top-0 bottom-0 w-px bg-line-strong" style={{ left: c.progress * 100 + "%" }} />
         ))}
+        {/* marker for the device's last-read point */}
+        {rp != null && (
+          <div className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-ink rounded-full"
+               style={{ left: rp * 100 + "%" }} title={`You've read to ${Math.round(rp * 100)}%`} />
+        )}
       </div>
 
       <input type="range" min={0} max={1} step={0.005} value={scrub} className="scrubber mt-2"

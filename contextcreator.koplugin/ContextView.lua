@@ -68,11 +68,23 @@ local BUILTIN_SECTIONS = {
 --exclude_key drops one node (used by the link picker to hide the node being linked from).
 --show_counts appends "(N dot points)" to each row. custom-type headers carry _custom_type so the
 --caller can offer to rename them.
-local function groupedContextItems(doc, exclude_key, show_counts)
+--the progress (0..1) at which a context "appears": its earliest located point, else its own
+--anchor progress, else nil (unknown). mirrors the webapp's contextProgress so device + web filter alike.
+local function contextIntroProgress(node)
+    local min
+    for _, p in ipairs(node.points or {}) do
+        local pr = type(p) == "table" and p.progress or nil
+        if type(pr) == "number" and (min == nil or pr < min) then min = pr end
+    end
+    if min ~= nil then return min end
+    return type(node.progress) == "number" and node.progress or nil
+end
+
+local function groupedContextItems(doc, exclude_key, show_counts, filter_fn)
     --bucket contexts by type
     local buckets = {}
     for key, node in pairs(doc.contexts) do
-        if key ~= exclude_key then
+        if key ~= exclude_key and (filter_fn == nil or filter_fn(key, node)) then
             local t = (node.type == nil or node.type == "") and "unset" or node.type
             buckets[t] = buckets[t] or {}
             table.insert(buckets[t], { key = key, title = node.title, n = #node.points })
@@ -659,7 +671,30 @@ function ContextView:showAllContexts()
         return
     end
 
-    local items = groupedContextItems(doc, nil, true)
+    --how far the reader has read (0..1), used by the "only up to here" filter. nil if we can't tell,
+    --in which case the filter is unavailable and we just show everything.
+    local progress = self.store:describeLocator(nil).progress
+    local only_read = self._only_read and progress ~= nil
+
+    local filter_fn = only_read and function(_key, node)
+        local intro = contextIntroProgress(node)
+        --keep contexts introduced at or before here; ones with no known spot stay visible (can't place them)
+        return intro == nil or intro <= progress + 1e-6
+    end or nil
+
+    local items = groupedContextItems(doc, nil, true, filter_fn)
+
+    --a tappable row at the very top to flip between all contexts and only those up to the reading spot
+    if progress ~= nil then
+        local pct = math.floor(progress * 100 + 0.5)
+        table.insert(items, 1, {
+            text = only_read
+                and T(_("\u{25C9} Up to where you've read (%1%) \u{2022} tap to show all"), pct)
+                or T(_("\u{25CB} Showing all \u{2022} tap to show only up to %1%"), pct),
+            bold = true,
+            _toggle = true,
+        })
+    end
 
     local menu
     menu = SectionedMenu:new{
@@ -670,11 +705,18 @@ function ContextView:showAllContexts()
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false, --keep the border but drop Menus rounded corners
         onMenuSelect = function(_self, item)
+            if item._toggle then --flip the filter and rebuild the list in place
+                self._only_read = not self._only_read
+                UIManager:close(menu)
+                self:showAllContexts()
+                return
+            end
             if item._header then return end --section headers aren't tappable
             UIManager:close(menu)
             self:openContext(item._key)
         end,
         onMenuHold = function(_self, item)
+            if item._toggle then return true end --no actions on the filter row
             if item._header then
                 if item._custom_type then self:renameCustomType(item._custom_type, menu) end
                 return true

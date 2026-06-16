@@ -108,7 +108,13 @@ function ContextSync:syncNow(interactive)
 
     local s = self:settings()
     local client = ContextSyncClient:new(s.server, s.username, s.password)
-    local ok, merged = client:pushBook(book_id, self.store:load())
+    --stamp where the reader is up to so the webapp can jump its timeline there. computed fresh on each
+    --push (including periodic ones) so it tracks reading, not just note edits. the merged result we adopt
+    --carries it back, so the local file stays current too.
+    local doc = self.store:load()
+    local progress = self.store:describeLocator(nil).progress
+    if progress then doc.reading_progress = progress end
+    local ok, merged = client:pushBook(book_id, doc)
     if ok and type(merged) == "table" and merged.contexts then
         self.store:replace(merged) -- adopt the merged result without re-triggering a sync
         if interactive then
