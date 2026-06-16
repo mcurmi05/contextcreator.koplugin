@@ -27,14 +27,15 @@ export default {
         pop: "0 12px 34px -12px rgba(28,25,23,0.30), 0 2px 8px rgba(28,25,23,0.08)",
       },
       keyframes: {
+        //a gentle fade + slight rise/scale, soft enough that cards don't pop in jarringly
         pop: {
-          "0%": { opacity: "0", transform: "scale(0.94) translateY(4px)" },
+          "0%": { opacity: "0", transform: "scale(0.98) translateY(6px)" },
           "100%": { opacity: "1", transform: "scale(1) translateY(0)" },
         },
         fadein: { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
       },
       animation: {
-        pop: "pop 180ms cubic-bezier(0.22, 1, 0.36, 1)",
+        pop: "pop 240ms cubic-bezier(0.22, 1, 0.36, 1)",
         fadein: "fadein 200ms ease-out",
       },
     },

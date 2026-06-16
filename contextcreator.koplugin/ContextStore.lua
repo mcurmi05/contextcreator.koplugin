@@ -61,6 +61,29 @@ function ContextStore:getBookAuthors()
     return props.authors or props.author or props.Author or ""
 end
 
+--the books series name from koreaders metadata, so the webapp can group books into series on its own.
+--some metadata packs the index in like "Red Rising #2", strip that so we just keep the name
+function ContextStore:getBookSeries()
+    local props = self.ui.doc_props or {}
+    local s = props.series
+    if type(s) ~= "string" or s == "" then return nil end
+    local name = s:match("^(.-)%s*#%s*[%d%.]+%s*$")
+    return (name and name ~= "") and name or s
+end
+
+--the books position in its series (1 based, may be a float), from metadata or parsed out of the name
+function ContextStore:getBookSeriesIndex()
+    local props = self.ui.doc_props or {}
+    local idx = props.series_index
+    if type(idx) == "number" then return idx end
+    if type(idx) == "string" and idx ~= "" then return tonumber(idx) end
+    if type(props.series) == "string" then
+        local n = props.series:match("#%s*([%d%.]+)")
+        if n then return tonumber(n) end
+    end
+    return nil
+end
+
 --describe a book locator for the timeline: returns { pos, progress, chapter, page }.
 --pos is the locator we anchored to (the one given, or the current reading position if pos is nil),
 --kept for on-device jump-back. progress is a 0..1 fraction through the book (the universal,
@@ -173,6 +196,9 @@ function ContextStore:load()
     doc.book.id = doc.book.id or self:getBookId()
     doc.book.title = self:getBookTitle()
     doc.book.authors = self:getBookAuthors()
+    --carry the series grouping up so the webapp can file the book without the user redoing it
+    doc.book.series = self:getBookSeries()
+    doc.book.series_index = self:getBookSeriesIndex()
     --snapshot the chapter list once so the webapp timeline can show chapter bands without the book
     if not doc.book.toc then
         doc.book.toc = self:buildTocSnapshot()

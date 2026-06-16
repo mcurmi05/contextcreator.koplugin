@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { TrashImg } from "./icons";
 
 //a single dot point. when editable, click the text to edit it inline (Enter saves, Esc cancels).
 //when onDelete is given, a × appears on hover to remove the point.
@@ -29,7 +30,9 @@ export default function PointItem({ text, dim, editable, onSave, onDelete }: {
                 title={editable ? "click to edit" : undefined}>{text}</span>
           {onDelete && (
             <button onClick={onDelete} title="Delete dot point" aria-label="Delete dot point"
-                    className="shrink-0 text-ink-faint hover:text-red-600 transition leading-6 opacity-0 group-hover:opacity-100">×</button>
+                    className="group/trash shrink-0 self-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <TrashImg className="w-3.5 h-3.5" />
+            </button>
           )}
         </>
       )}

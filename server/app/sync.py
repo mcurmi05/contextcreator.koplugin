@@ -112,8 +112,14 @@ def _merge_relationship(versions, point_tombstones):
 
 def _merge_book(a, b):
     book = {}
-    for field in ("id", "title", "authors"):
+    for field in ("id", "title", "authors", "series"):
         book[field] = b.get(field) or a.get(field)
+    #series_index can legitimately be 0/falsy, so pick by presence not truthiness (incoming/device wins)
+    si = b.get("series_index")
+    if si is None:
+        si = a.get("series_index")
+    if si is not None:
+        book["series_index"] = si
     toc = b.get("toc") or a.get("toc")
     if toc:
         book["toc"] = toc

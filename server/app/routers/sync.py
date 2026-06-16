@@ -53,13 +53,29 @@ def push_book(book_id: str, body: dict, user: User = Depends(get_sync_user), ses
     authors = book_meta.get("authors") or ""
     updated = merged.get("updated") or 0
 
+    #series grouping straight from koreader's metadata, so the web ui files the book on its own. the
+    #device index is 1 based (and maybe a float), the web stores it 0 based.
+    meta_series = book_meta.get("series")
+    meta_series = meta_series.strip() if isinstance(meta_series, str) else ""
+
+    def _idx0(v):
+        try:
+            return max(0, int(round(float(v))) - 1)
+        except (TypeError, ValueError):
+            return 0
+
     if row:
         row.doc_json = doc_json
         row.title = title or row.title
         row.authors = authors or row.authors
         row.updated = updated
+        #adopt koreader's series, but never overwrite a grouping the user has set on the web
+        if meta_series and not (row.series or "").strip():
+            row.series = meta_series
+            row.series_index = _idx0(book_meta.get("series_index"))
     else:
         row = Book(user_id=user.id, book_id=book_id, title=title, authors=authors,
+                   series=meta_series, series_index=_idx0(book_meta.get("series_index")) if meta_series else 0,
                    doc_json=doc_json, updated=updated)
         session.add(row)
     session.commit()

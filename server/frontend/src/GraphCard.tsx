@@ -1,5 +1,6 @@
 import { useState } from "react";
 import PointItem from "./PointItem";
+import { IconImg, TrashImg } from "./icons";
 import { colorFor, isCustomType, pointText, pointProgress, typeLabel } from "./model";
 import type { Context, GraphEditOps, Point, PointRef, Relationship, Selected } from "./types";
 
@@ -10,8 +11,10 @@ const BUILTIN_TYPES = ["character", "place", "object", "concept", "unset"];
 function Grip({ onDrag }: { onDrag?: (e: React.PointerEvent) => void }) {
   if (!onDrag) return null;
   return (
-    <span onPointerDown={onDrag} title="Drag to move" aria-hidden="true"
-          className="cursor-grab active:cursor-grabbing select-none touch-none text-ink-faint hover:text-ink -ml-1 pr-0.5">⠿</span>
+    <span onPointerDown={onDrag} title="Drag to move"
+          className="cursor-grab active:cursor-grabbing select-none touch-none -ml-1 pr-0.5">
+      <IconImg src="/drag.png" className="w-3.5 h-3.5 opacity-60" />
+    </span>
   );
 }
 
@@ -34,6 +37,8 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
   const [titleDraft, setTitleDraft] = useState(ctx.title);
   const [note, setNote] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customVal, setCustomVal] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
   const [target, setTarget] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
@@ -53,6 +58,7 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
     ops.createLink(from, to, linkLabel, dir !== "none");
     setLinkOpen(false); setTarget(""); setLinkLabel(""); setDir("to");
   };
+  const applyCustom = () => { const t = customVal.trim(); if (t) { ops.setType(ckey, t); setCustomOpen(false); setCustomVal(""); } };
 
   return (
     <div className="w-72 max-h-[72vh] flex flex-col rounded-xl border border-line bg-paper-card shadow-pop overflow-hidden">
@@ -70,24 +76,39 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
             {ctx.title}
           </strong>
         )}
-        <CloseBtn onClose={() => onSelect(null)} />
+        <button className="group/trash shrink-0 flex items-center transition" title="Delete context"
+                aria-label="Delete context" onPointerDown={(e) => e.stopPropagation()} onClick={() => setConfirmDel(true)}>
+          <TrashImg className="w-4 h-4" />
+        </button>
       </div>
 
       {/* type + delete */}
       {confirmDel ? (
         <div className="flex items-center gap-2 px-3 py-2 border-b border-line text-sm">
-          <span className="flex-1">Delete this node and its links?</span>
+          <span className="flex-1">Delete this context and its relationships?</span>
           <button className="text-red-600 font-semibold hover:underline" onClick={() => ops.deleteContext(ckey)}>Delete</button>
           <button className="text-ink-soft hover:text-ink" onClick={() => setConfirmDel(false)}>Cancel</button>
         </div>
       ) : (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line">
-          <span className="text-xs text-ink-faint">Type</span>
-          <select value={ctx.type || "unset"} onChange={(e) => ops.setType(ckey, e.target.value)}
-                  className="flex-1 text-sm bg-paper-card border border-line rounded-md px-1.5 py-1 focus:outline-none focus:border-accent-ring">
-            {types.map((t) => <option key={t} value={t}>{typeLabel(t) || "No type"}</option>)}
-          </select>
-          <button className="text-ink-faint hover:text-red-600 transition text-sm" title="Delete node" onClick={() => setConfirmDel(true)}>Delete</button>
+        <div className="flex flex-col gap-1.5 px-3 py-1.5 border-b border-line">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-ink-faint">Type</span>
+            <select value={ctx.type || "unset"} onChange={(e) => ops.setType(ckey, e.target.value)}
+                    className="flex-1 text-sm bg-paper-card border border-line rounded-md px-1.5 py-1 focus:outline-none focus:border-accent-ring">
+              {types.map((t) => <option key={t} value={t}>{typeLabel(t) || "No type"}</option>)}
+            </select>
+            <button className="text-xs text-accent-hover hover:underline shrink-0"
+                    onClick={() => { setCustomOpen((v) => !v); setCustomVal(""); }}>{customOpen ? "Cancel" : "+ custom"}</button>
+          </div>
+          {customOpen && (
+            <div className="flex gap-1.5">
+              <input autoFocus className="flex-1 px-2 py-1 rounded-md border border-line bg-paper-card text-sm focus:outline-none focus:border-accent-ring"
+                     placeholder="custom type name" value={customVal}
+                     onChange={(e) => setCustomVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyCustom()} />
+              <button className="px-2.5 py-1 rounded-md bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition disabled:opacity-50"
+                      disabled={!customVal.trim()} onClick={applyCustom}>Set</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -101,11 +122,11 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
           {(!ctx.points || ctx.points.length === 0) && <li className="text-ink-faint italic">no notes yet</li>}
         </ul>
 
-        {/* links */}
+        {/* relationships */}
         <div className="px-3 pb-2 pt-1 border-t border-line">
           <div className="flex items-center gap-1 mb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint flex-1">Links</span>
-            <button className="text-xs text-accent-hover hover:underline" onClick={() => setLinkOpen((v) => !v)}>{linkOpen ? "Cancel" : "+ Add link"}</button>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint flex-1">Relationships</span>
+            <button className="text-xs text-accent-hover hover:underline" onClick={() => setLinkOpen((v) => !v)}>{linkOpen ? "Cancel" : "+ Add relationship"}</button>
           </div>
           <ul className="space-y-0.5 text-sm">
             {links.map((r) => {
@@ -118,19 +139,21 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
                     <span className="text-ink-faint">{arrow}</span> {contexts[otherKey]?.title || otherKey}
                     {r.label ? <span className="text-ink-faint"> · {r.label}</span> : null}
                   </button>
-                  <button className="shrink-0 text-ink-faint hover:text-red-600 transition opacity-0 group-hover:opacity-100"
-                          title="Delete link" onClick={() => ops.deleteLink(r.id)}>×</button>
+                  <button className="group/trash shrink-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Delete relationship" aria-label="Delete relationship" onClick={() => ops.deleteLink(r.id)}>
+                    <TrashImg className="w-3.5 h-3.5" />
+                  </button>
                 </li>
               );
             })}
-            {links.length === 0 && !linkOpen && <li className="text-ink-faint italic">no links yet</li>}
+            {links.length === 0 && !linkOpen && <li className="text-ink-faint italic">no relationships yet</li>}
           </ul>
 
           {linkOpen && (
             <div className="mt-2 flex flex-col gap-1.5">
               <select value={target} onChange={(e) => setTarget(e.target.value)}
                       className="text-sm bg-paper-card border border-line rounded-md px-1.5 py-1 focus:outline-none focus:border-accent-ring">
-                <option value="">Link to…</option>
+                <option value="">Relate to…</option>
                 {others.map(([k, c]) => <option key={k} value={k}>{c.title || k}</option>)}
               </select>
               <div className="flex gap-1">
@@ -145,7 +168,7 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
                        placeholder="label (optional)" value={linkLabel}
                        onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => e.key === "Enter" && create()} />
                 <button className="px-2.5 py-1 rounded-md bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition disabled:opacity-50"
-                        disabled={!target} onClick={create}>Link</button>
+                        disabled={!target} onClick={create}>Add</button>
               </div>
             </div>
           )}
@@ -210,12 +233,12 @@ export function RelCard({ rel, contexts, scrub, ops, onSelect, onDrag }: {
                      onSave={(t) => ops.editRelPoint(rel.id, pointRef(p, i), t)}
                      onDelete={() => ops.deleteRelPoint(rel.id, pointRef(p, i))} />
         ))}
-        {(!rel.points || rel.points.length === 0) && <li className="text-ink-faint italic">no notes on this link</li>}
+        {(!rel.points || rel.points.length === 0) && <li className="text-ink-faint italic">no notes on this relationship</li>}
       </ul>
 
       {confirmDel ? (
         <div className="flex items-center gap-2 px-3 py-2 border-t border-line text-sm">
-          <span className="flex-1">Delete this link?</span>
+          <span className="flex-1">Delete this relationship?</span>
           <button className="text-red-600 font-semibold hover:underline" onClick={() => ops.deleteLink(rel.id)}>Delete</button>
           <button className="text-ink-soft hover:text-ink" onClick={() => setConfirmDel(false)}>Cancel</button>
         </div>
@@ -225,7 +248,9 @@ export function RelCard({ rel, contexts, scrub, ops, onSelect, onDrag }: {
                  placeholder="add a note…" value={note}
                  onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitNote()} />
           <button className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition" onClick={submitNote}>Add</button>
-          <button className="px-2 py-1.5 rounded-lg border border-line text-ink-faint hover:text-red-600 transition text-sm" title="Delete link" onClick={() => setConfirmDel(true)}>🗑</button>
+          <button className="group/trash px-2 py-1.5 rounded-lg border border-line hover:bg-paper-sunk transition" title="Delete relationship" aria-label="Delete relationship" onClick={() => setConfirmDel(true)}>
+            <TrashImg className="w-4 h-4" />
+          </button>
         </div>
       )}
     </div>

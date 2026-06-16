@@ -3,6 +3,7 @@ import cytoscape, { type Core } from "cytoscape";
 import cola from "cytoscape-cola";
 import { colorFor, contextProgress, typeLabel, TYPE_LABELS } from "./model";
 import { btnGhost } from "./ui";
+import { IconImg } from "./icons";
 import { NodeCard, RelCard } from "./GraphCard";
 import type { GraphPrefs, XY } from "./theme";
 import type { Doc, GraphEditOps, PointRef, Selected } from "./types";
@@ -30,6 +31,9 @@ const reducedMotion = () =>
 //node circle grows with how much you've written about it
 const nodeSize = (n: number) => 28 + Math.min(n * 4, 24);
 
+//how long the hover-focus dim (and the restore on mouse-out) takes
+const FADE_MS = 150;
+
 //per-book graph. contexts are springy nodes (coloured by type, sized by note count), relationships
 //are edges. hovering spotlights a neighbourhood, selecting pops a note card anchored to the node
 //(rather than just outlining the circle), and the scrub fades in nodes as the story reaches them.
@@ -51,6 +55,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   const layoutRef = useRef<{ stop: () => void } | null>(null);
   const structRef = useRef<string>("");        //signature of the node/edge set, to know when to relayout
   const rafRef = useRef<number>(0);
+  const fadeRafRef = useRef<number>(0);        //drives the manual opacity fade loop
 
   //live values read inside long-lived cytoscape event handlers
   const scrubRef = useRef(scrub);
@@ -151,27 +156,60 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     saveTimer.current = window.setTimeout(() => savePositions(true), 500);
   }
 
-  //recompute element opacity/visibility from scrub + filter + spotlight, all in one place
+  //point an element at a target opacity (+ label opacity). we don't set it directly; we record a tween on
+  //the element's scratch and let the rAF loop ease it there, starting from wherever it is right now (so a
+  //re-hover mid-fade picks up smoothly). already-there elements are left alone.
+  function aim(ele: cytoscape.NodeSingular | cytoscape.EdgeSingular, op: number, textOp: number, now: number) {
+    const curOp = Number(ele.style("opacity"));
+    const curTx = Number(ele.style("text-opacity"));
+    if (Math.abs(curOp - op) < 0.004 && Math.abs(curTx - textOp) < 0.004) { ele.removeScratch("_fade"); return; }
+    ele.scratch("_fade", { fromOp: curOp, toOp: op, fromTx: curTx, toTx: textOp, start: now, dur: FADE_MS });
+  }
+
+  //our own opacity fade loop. cytoscape's stylesheet transitions and its animate() both refused to ease
+  //node opacity smoothly here, so we just lerp it ourselves every frame, which is fully under our control.
+  function runFadeLoop() {
+    if (fadeRafRef.current) return; //already running
+    const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2); //easeInOutQuad
+    const step = () => {
+      const cy = cyRef.current;
+      if (!cy) { fadeRafRef.current = 0; return; }
+      const now = performance.now();
+      let active = 0;
+      cy.elements().forEach((ele) => {
+        const f = ele.scratch("_fade") as undefined | { fromOp: number; toOp: number; fromTx: number; toTx: number; start: number; dur: number };
+        if (!f) return;
+        const t = f.dur <= 0 ? 1 : Math.min(1, (now - f.start) / f.dur);
+        const k = ease(t);
+        ele.style({ opacity: f.fromOp + (f.toOp - f.fromOp) * k, "text-opacity": f.fromTx + (f.toTx - f.fromTx) * k });
+        if (t >= 1) ele.removeScratch("_fade"); else active++;
+      });
+      fadeRafRef.current = active > 0 ? requestAnimationFrame(step) : 0;
+    };
+    fadeRafRef.current = requestAnimationFrame(step);
+  }
+
+  //recompute element visibility from scrub + filter, and aim opacity at the spotlight target, in one place
   function refresh() {
     const cy = cyRef.current; if (!cy) return;
     const sc = scrubRef.current, hidden = hiddenRef.current, focus = focusRef.current;
-    cy.batch(() => {
-      cy.nodes().forEach((n) => {
-        const cp = n.data("cp") as number | null;
-        //a node the story hasn't reached, or a filtered-out type, leaves the graph entirely
-        if (hidden.has(n.data("type") || "unset") || (cp != null && cp > sc)) { n.style("display", "none"); return; }
-        n.style("display", "element");
-        const focused = !focus || focus.has(n.id());
-        n.style({ opacity: focused ? 1 : 0.16, "text-opacity": focused ? 1 : 0.25, events: "yes" });
-      });
-      cy.edges().forEach((e) => {
-        const s = e.source(), t = e.target();
-        if (s.style("display") === "none" || t.style("display") === "none") { e.style("display", "none"); return; }
-        e.style("display", "element");
-        const focused = !focus || (focus.has(s.id()) && focus.has(t.id()));
-        e.style({ opacity: focused ? 0.9 : 0.12, "text-opacity": focused ? 1 : 0 });
-      });
+    const now = performance.now();
+    cy.nodes().forEach((n) => {
+      const cp = n.data("cp") as number | null;
+      //a node the story hasn't reached, or a filtered-out type, leaves the graph entirely
+      if (hidden.has(n.data("type") || "unset") || (cp != null && cp > sc)) { n.style("display", "none"); return; }
+      n.style({ display: "element", events: "yes" });
+      const focused = !focus || focus.has(n.id());
+      aim(n, focused ? 1 : 0.16, focused ? 1 : 0.25, now);
     });
+    cy.edges().forEach((e) => {
+      const s = e.source(), t = e.target();
+      if (s.style("display") === "none" || t.style("display") === "none") { e.style("display", "none"); return; }
+      e.style("display", "element");
+      const focused = !focus || (focus.has(s.id()) && focus.has(t.id()));
+      aim(e, focused ? 0.9 : 0.12, focused ? 1 : 0, now);
+    });
+    runFadeLoop();
   }
 
   //build the cytoscape instance once
@@ -180,6 +218,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     const cy = cytoscape({
       container: canvasRef.current,
       minZoom: 0.2, maxZoom: 2.5, wheelSensitivity: 0.25,
+      boxSelectionEnabled: false, //drag on empty space pans, no selection rectangle
       style: [
         { selector: "node", style: {
           "background-color": "data(color)", label: "data(label)",
@@ -189,24 +228,32 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
           color: "#1C1917", "text-valign": "bottom", "text-margin-y": 6, "text-max-width": "120px",
           "text-background-color": "#FAF7F2", "text-background-opacity": 0.82,
           "text-background-padding": "2px", "text-background-shape": "roundrectangle",
-          "transition-property": "opacity, width, height", "transition-duration": 160,
+          //opacity is faded explicitly via ele.animate (see fade()), the rest can use cheap style transitions
+          "transition-property": "width, height, background-color",
+          "transition-duration": 240, "transition-timing-function": "ease-in-out",
         } },
         { selector: "node.sel", style: {
           "underlay-color": "data(color)", "underlay-opacity": 0.22, "underlay-padding": 12,
           "border-width": 3, "border-color": "data(color)", "z-index": 20,
         } },
         { selector: "edge", style: {
-          width: 2, "line-color": "#CFC7BA", "curve-style": "bezier",
+          width: 2, opacity: 0.9, "line-color": "#CFC7BA", "curve-style": "bezier",
           label: "data(label)", "font-family": "Fira Sans, sans-serif", "font-size": 10,
           color: "#57534E", "text-rotation": "autorotate",
           "text-background-color": "#FAF7F2", "text-background-opacity": 0.82, "text-background-padding": "2px",
           "target-arrow-color": "#CFC7BA",
-          "transition-property": "opacity, line-color", "transition-duration": 160,
+          "transition-property": "line-color",
+          "transition-duration": 240, "transition-timing-function": "ease-in-out",
         } },
         { selector: "edge.directed", style: { "target-arrow-shape": "triangle" } },
         { selector: "edge.sel", style: {
           "line-color": "#C2620B", "target-arrow-color": "#C2620B", width: 3, color: "#9A4D08", "z-index": 20,
         } },
+        //no grey ring around a node/edge while it's pressed, active, or being dragged
+        { selector: "node, edge", style: { "overlay-opacity": 0 } },
+        { selector: "node:active, edge:active, node:grabbed", style: { "overlay-opacity": 0 } },
+        //no translucent circle at the cursor when pressing/panning the background
+        { selector: "core", style: { "active-bg-opacity": 0, "active-bg-size": 0 } as unknown as cytoscape.Css.Core },
       ],
       layout: { name: "preset" },
     });
@@ -217,14 +264,28 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
       cy.getElementById(id).connectedEdges().connectedNodes().forEach((n) => { set.add(n.id()); });
       return set;
     };
-    cy.on("mouseover", "node", (e) => { if (!hoverFocusRef.current) return; focusRef.current = neighbourhood(e.target.id()); refresh(); });
-    cy.on("mouseout", "node", () => { focusRef.current = selFocusRef.current; refresh(); });
+    //cursor: grab over the (pannable) background, pointer over clickable nodes/edges, grabbing while dragging
+    const setCursor = (c: string) => { if (canvasRef.current) canvasRef.current.style.cursor = c; };
+    setCursor("grab");
+    cy.on("mouseover", "node", (e) => {
+      setCursor("pointer");
+      if (!hoverFocusRef.current) return;
+      focusRef.current = neighbourhood(e.target.id()); refresh();
+    });
+    cy.on("mouseout", "node", () => { setCursor("grab"); focusRef.current = selFocusRef.current; refresh(); });
+    cy.on("mouseover", "edge", () => setCursor("pointer"));
+    cy.on("mouseout", "edge", () => setCursor("grab"));
+    //grabbing (closed hand) while dragging a node or panning the background, back to the right idle cursor after
+    cy.on("grab", "node", () => setCursor("grabbing"));
+    cy.on("free", "node", () => setCursor("pointer"));
+    cy.on("tapstart", (e) => { if (e.target === cy) setCursor("grabbing"); });
+    cy.on("tapend", (e) => { if (e.target === cy) setCursor("grab"); });
     cy.on("tap", "node", (e) => onSelect({ kind: "context", id: e.target.id() }));
     cy.on("tap", "edge", (e) => onSelect({ kind: "relationship", id: e.target.id() }));
     cy.on("tap", (e) => { if (e.target === cy) onSelect(null); });
     cy.on("dragfree", "node", scheduleSave); //save positions after the user drops a node
 
-    return () => { layoutRef.current?.stop(); cy.destroy(); cyRef.current = null; };
+    return () => { cancelAnimationFrame(fadeRafRef.current); layoutRef.current?.stop(); cy.destroy(); cyRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -427,8 +488,9 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
           <div ref={legendRef}
                style={pctStyle(posFor("legend", graph.legendPos))}
                className={`absolute z-10 ${posFor("legend", graph.legendPos) ? "" : "top-3 left-3"} rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card p-2 w-[200px]`}>
-            <div className="flex items-center gap-1 px-1.5 pb-1.5 cursor-grab active:cursor-grabbing select-none touch-none"
+            <div className="flex items-center gap-1.5 px-1.5 pb-1.5 cursor-grab active:cursor-grabbing select-none touch-none"
                  onPointerDown={(e) => startDrag(e, legendRef.current, "legend")} title="Drag to move">
+              <IconImg src="/drag.png" className="w-3 h-3 opacity-60" />
               <span className="flex-1 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Types · filter</span>
               <button className="text-ink-faint hover:text-ink transition text-sm leading-none px-1" title="Collapse"
                       onPointerDown={(e) => e.stopPropagation()} onClick={() => setLegendOpen(false)}>‹</button>
@@ -497,23 +559,17 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
              style={pctStyle(posFor("controls", graph.controlsPos))}
              className={`absolute z-10 ${posFor("controls", graph.controlsPos) ? "" : "bottom-3 left-3"} flex flex-col rounded-xl border border-line bg-paper-card/90 backdrop-blur shadow-card overflow-hidden`}>
           <div onPointerDown={(e) => startDrag(e, controlsRef.current, "controls")}
-               className="flex items-center justify-center leading-none py-1 border-b border-line text-ink-faint cursor-grab active:cursor-grabbing select-none touch-none hover:bg-paper-sunk hover:text-ink"
-               title="Drag to move these controls">⠿</div>
+               className="flex items-center justify-center py-1 border-b border-line cursor-grab active:cursor-grabbing select-none touch-none hover:bg-paper-sunk"
+               title="Drag to move these controls"><IconImg src="/drag.png" className="w-4 h-3.5" /></div>
           <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom in"
-                  onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) * 1.25, duration: 150 })}>+</button>
+                  onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) * 1.25, duration: 150 })}><IconImg src="/plus.png" /></button>
           <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Zoom out"
-                  onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) / 1.25, duration: 150 })}>−</button>
+                  onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) / 1.25, duration: 150 })}><IconImg src="/minus.png" /></button>
           <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Fit to view"
-                  onClick={() => { const cy = cyRef.current; if (cy) cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 300 }); }}>⤢</button>
-          <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Reset layout (space nodes evenly)" onClick={resetLayout}>⊞</button>
+                  onClick={() => { const cy = cyRef.current; if (cy) cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 300 }); }}><IconImg src="/expand.png" /></button>
+          <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Reset layout (space nodes evenly)" onClick={resetLayout}><IconImg src="/grid.png" /></button>
           <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5`} title={isFs ? "Exit fullscreen" : "Fullscreen graph"}
-                  aria-label={isFs ? "Exit fullscreen" : "Fullscreen graph"} onClick={toggleFullscreen}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="mx-auto">
-              {isFs
-                ? <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" />
-                : <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />}
-            </svg>
-          </button>
+                  aria-label={isFs ? "Exit fullscreen" : "Fullscreen graph"} onClick={toggleFullscreen}><IconImg src="/fullscreen.png" /></button>
         </div>
       )}
 
