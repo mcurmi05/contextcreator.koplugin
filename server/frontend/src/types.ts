@@ -31,12 +31,15 @@ export interface Relationship {
 export interface TocEntry { title: string; progress: number; }
 export interface BookMeta { id?: string; title?: string; authors?: string; toc?: TocEntry[]; }
 
+export interface NodePos { x: number; y: number; }
+
 export interface Doc {
   schema?: number;
   book?: BookMeta;
   updated?: number;
   contexts: Record<string, Context>;
   relationships?: Relationship[];
+  layout?: Record<string, NodePos>;   //web-set node positions, keyed by context key
   tombstones?: unknown;
 }
 

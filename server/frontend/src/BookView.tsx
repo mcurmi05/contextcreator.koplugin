@@ -16,6 +16,8 @@ export default function BookView({ bookId, onBack }: { bookId: string; onBack: (
   const [selected, setSelected] = useState<Selected>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [typeColors, setTypeColors] = useState<Record<string, string>>(loadTypeColors);
+  const [undoStack, setUndoStack] = useState<Doc[]>([]);
+  const [redoStack, setRedoStack] = useState<Doc[]>([]);
   const lastUpdated = useRef<number | undefined>(undefined);
 
   const reload = useCallback(async () => {
@@ -37,24 +39,76 @@ export default function BookView({ bookId, onBack }: { bookId: string; onBack: (
     return () => clearInterval(t);
   }, [bookId]);
 
-  async function addContext(title: string, type: string) {
-    await api(`/api/books/${encodeURIComponent(bookId)}/contexts`, {
-      method: "POST", body: JSON.stringify({ title, type }),
-    });
+  //keyboard undo/redo (ignored while typing in a field)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "z" && !e.shiftKey) { e.preventDefault(); void undo(); }
+      else if (e.key === "y" || (e.key === "z" && e.shiftKey)) { e.preventDefault(); void redo(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  //snapshot the current doc onto the undo stack (and clear the redo branch) before a mutation
+  function pushHistory(before: Doc | null) {
+    if (!before) return;
+    setUndoStack((s) => [...s, before].slice(-60));
+    setRedoStack([]);
+  }
+  //web-authoritative replace (used by undo/redo + node-position saves); sets the doc exactly
+  async function applyReplace(next: Doc) {
+    const saved = await api<Doc>("/api/books/" + encodeURIComponent(bookId), { method: "PUT", body: JSON.stringify(next) });
+    lastUpdated.current = saved.updated;
+    setDoc(saved);
+  }
+  //run a mutating endpoint, recording history so it can be undone
+  async function edit(fn: () => Promise<void>) {
+    const before = doc;
+    await fn();
     await reload();
+    pushHistory(before);
+  }
+
+  async function addContext(title: string, type: string) {
+    await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/contexts`, {
+      method: "POST", body: JSON.stringify({ title, type }),
+    }).then(() => {}));
   }
   async function addPoint(key: string, text: string) {
-    await api(`/api/books/${encodeURIComponent(bookId)}/contexts/${encodeURIComponent(key)}/points`, {
+    await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/contexts/${encodeURIComponent(key)}/points`, {
       method: "POST", body: JSON.stringify({ text }),
-    });
-    await reload();
+    }).then(() => {}));
   }
   async function editPoint(key: string, ref: { id?: string; index: number }, text: string) {
-    await api(`/api/books/${encodeURIComponent(bookId)}/contexts/${encodeURIComponent(key)}/points`, {
+    await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/contexts/${encodeURIComponent(key)}/points`, {
       method: "PATCH", body: JSON.stringify({ text, id: ref.id, index: ref.index }),
-    });
-    await reload();
+    }).then(() => {}));
   }
+  //persist node positions from the graph. a user move/reset (record=true) goes on the undo stack; the
+  //auto-save after an initial arrange (record=false) just persists so reopening resumes the layout.
+  async function commitPositions(positions: Record<string, { x: number; y: number }>, record: boolean) {
+    if (!doc) return;
+    if (record) pushHistory(doc);
+    await applyReplace({ ...doc, layout: { ...(doc.layout || {}), ...positions } });
+  }
+  async function undo() {
+    if (!undoStack.length || !doc) return;
+    const prev = undoStack[undoStack.length - 1];
+    setUndoStack((s) => s.slice(0, -1));
+    setRedoStack((s) => [...s, doc]);
+    await applyReplace(prev);
+  }
+  async function redo() {
+    if (!redoStack.length || !doc) return;
+    const next = redoStack[redoStack.length - 1];
+    setRedoStack((s) => s.slice(0, -1));
+    setUndoStack((s) => [...s, doc]);
+    await applyReplace(next);
+  }
+
   function toggleType(t: string) {
     setHiddenTypes((prev) => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; });
   }
@@ -64,8 +118,7 @@ export default function BookView({ bookId, onBack }: { bookId: string; onBack: (
   async function importBook(file: File) {
     try {
       const data = await readJsonFile(file);
-      await api(`/api/books/${encodeURIComponent(bookId)}/import`, { method: "POST", body: JSON.stringify(data) });
-      await reload();
+      await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/import`, { method: "POST", body: JSON.stringify(data) }).then(() => {}));
     } catch (e) { alert("Import failed: " + (e as Error).message); }
   }
   function setTypeColor(t: string, color: string | null) {
@@ -95,6 +148,8 @@ export default function BookView({ bookId, onBack }: { bookId: string; onBack: (
           </p>
         </div>
         <span className="flex-1" />
+        <button className={btn} onClick={undo} disabled={!undoStack.length} title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶</button>
+        <button className={btn} onClick={redo} disabled={!redoStack.length} title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↷</button>
         <button className={btn} onClick={exportBook} title="Download this book's contexts">Export</button>
         <label className={`${btn} cursor-pointer`} title="Merge a contexts file into this book">
           Import
@@ -121,7 +176,7 @@ export default function BookView({ bookId, onBack }: { bookId: string; onBack: (
         {tab === "graph" ? (
           <Graph doc={doc} scrub={scrub} selected={selected} onSelect={setSelected}
                  hiddenTypes={hiddenTypes} onToggleType={toggleType} typeColors={typeColors} onSetTypeColor={setTypeColor}
-                 onAddPoint={addPoint} onEditPoint={editPoint} />
+                 onAddPoint={addPoint} onEditPoint={editPoint} onMoveNodes={commitPositions} />
         ) : (
           <div className="h-full flex gap-3 items-start overflow-hidden">
             <div className="flex-1 min-w-0 h-full overflow-auto pr-1">

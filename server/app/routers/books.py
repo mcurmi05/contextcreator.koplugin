@@ -10,7 +10,7 @@ from .. import docops
 from ..db import get_session
 from ..deps import get_current_user
 from ..models import Book, User
-from ..sync import merge
+from ..sync import _normalize, merge
 
 router = APIRouter(prefix="/api", tags=["books"])
 
@@ -65,6 +65,22 @@ def list_books(user: User = Depends(get_current_user), session: Session = Depend
 def get_book(book_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     #the full stored document, so the web ui can show what's been synced
     return json.loads(_get_row(session, user, book_id).doc_json)
+
+
+@router.put("/books/{book_id}")
+def replace_book(book_id: str, body: dict, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #web-authoritative replace of the whole doc — used by undo/redo and node-position saves. unlike the
+    #additive endpoints this sets the document exactly (so undo can genuinely remove things).
+    row = _get_row(session, user, book_id)
+    doc = _normalize(body or {})
+    doc["updated"] = docops.now()
+    meta = doc.get("book") or {}
+    row.doc_json = json.dumps(doc)
+    row.title = meta.get("title") or row.title
+    row.authors = meta.get("authors") or row.authors
+    row.updated = doc["updated"]
+    session.commit()
+    return doc
 
 
 @router.get("/export")

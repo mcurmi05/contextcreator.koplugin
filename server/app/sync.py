@@ -19,6 +19,7 @@ def _normalize(doc):
     doc["updated"] = doc.get("updated") or 0
     doc["contexts"] = doc["contexts"] if isinstance(doc.get("contexts"), dict) else {}
     doc["relationships"] = doc["relationships"] if isinstance(doc.get("relationships"), list) else []
+    doc["layout"] = doc["layout"] if isinstance(doc.get("layout"), dict) else {}  #web-set node positions
     t = doc.get("tombstones") if isinstance(doc.get("tombstones"), dict) else {}
     t = dict(t)
     for k in EMPTY_TOMBSTONES:
@@ -34,6 +35,7 @@ def new_doc():
         "updated": 0,
         "contexts": {},
         "relationships": [],
+        "layout": {},
         "tombstones": {"contexts": {}, "relationships": {}, "points": {}},
     }
 
@@ -144,6 +146,11 @@ def merge(base, incoming):
         if tomb is not None and not rel["points"] and (rel.get("updated") or 0) <= tomb:
             continue
         out["relationships"].append(rel)
+
+    #node positions are a web-only display concern: union by context key, base (server) wins on conflict,
+    #and drop entries for contexts that no longer exist
+    layout = {**incoming.get("layout", {}), **base.get("layout", {})}
+    out["layout"] = {k: v for k, v in layout.items() if k in out["contexts"]}
 
     out["book"] = _merge_book(base["book"], incoming["book"])
     out["updated"] = max(base.get("updated") or 0, incoming.get("updated") or 0)

@@ -33,13 +33,14 @@ const nodeSize = (n: number) => 28 + Math.min(n * 4, 24);
 //per-book graph. contexts are springy nodes (coloured by type, sized by note count), relationships
 //are edges. hovering spotlights a neighbourhood, selecting pops a note card anchored to the node
 //(rather than just outlining the circle), and the scrub fades in nodes as the story reaches them.
-export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onToggleType, typeColors, onSetTypeColor, onAddPoint, onEditPoint }: {
+export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onToggleType, typeColors, onSetTypeColor, onAddPoint, onEditPoint, onMoveNodes }: {
   doc: Doc; scrub: number; selected: Selected;
   onSelect: (s: Selected) => void;
   hiddenTypes: Set<string>; onToggleType: (t: string) => void;
   typeColors: Record<string, string>; onSetTypeColor: (t: string, color: string | null) => void;
   onAddPoint: (key: string, text: string) => void;
   onEditPoint: (key: string, ref: { id?: string; index: number }, text: string) => void;
+  onMoveNodes: (positions: Record<string, { x: number; y: number }>, record: boolean) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -55,9 +56,25 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   const focusRef = useRef<Set<string> | null>(null);   //current spotlight (hover or selection)
   const selFocusRef = useRef<Set<string> | null>(null); //spotlight owned by the selection
   const colorsRef = useRef(typeColors);                  //user colour overrides, read inside nodeData
+  const onMoveRef = useRef(onMoveNodes);                  //latest position-save callback, for the once-bound drag handler
+  const saveTimer = useRef<number>(0);
+  useEffect(() => { onMoveRef.current = onMoveNodes; }, [onMoveNodes]);
 
   const [noteText, setNoteText] = useState("");
   const [legendOpen, setLegendOpen] = useState(true);
+
+  //collect every node's position and hand it up to be saved. `record` marks a user move (undoable);
+  //the auto-save after an initial arrange passes false so it doesn't create an undo step.
+  function savePositions(record: boolean) {
+    const cy = cyRef.current; if (!cy) return;
+    const positions: Record<string, { x: number; y: number }> = {};
+    cy.nodes().forEach((n) => { const p = n.position(); positions[n.id()] = { x: Math.round(p.x), y: Math.round(p.y) }; });
+    onMoveRef.current(positions, record);
+  }
+  function scheduleSave() {
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => savePositions(true), 500);
+  }
 
   //recompute element opacity/visibility from scrub + filter + spotlight, all in one place
   function refresh() {
@@ -130,6 +147,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     cy.on("tap", "node", (e) => onSelect({ kind: "context", id: e.target.id() }));
     cy.on("tap", "edge", (e) => onSelect({ kind: "relationship", id: e.target.id() }));
     cy.on("tap", (e) => { if (e.target === cy) onSelect(null); });
+    cy.on("dragfree", "node", scheduleSave); //save positions after the user drops a node
 
     return () => { layoutRef.current?.stop(); cy.destroy(); cyRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,10 +164,11 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     cy.batch(() => cy.nodes().forEach((n) => { n.data("color", colorFor(n.data("type"), typeColors)); }));
   }, [typeColors]);
 
-  //rebuild on structural change, otherwise just update node/edge data in place so the sim stays calm
+  //rebuild on structural change, otherwise just update node/edge data in place so positions stay put
   useEffect(() => {
     const cy = cyRef.current; if (!cy) return;
     const contexts = doc.contexts || {};
+    const layout = doc.layout || {};
     const rels = (doc.relationships || []).filter((r) => contexts[r.from] && contexts[r.to]);
     const struct = Object.keys(contexts).sort().join("|") + "##" + rels.map((r) => r.id).sort().join("|");
 
@@ -160,27 +179,43 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     };
 
     if (struct !== structRef.current) {
-      //the set of nodes/edges changed: rebuild + re-run the springy layout
+      //the set of nodes/edges changed: rebuild. start nodes at their saved positions when we have them.
       structRef.current = struct;
       layoutRef.current?.stop();
       cy.elements().remove();
+      const keys = Object.keys(contexts);
       cy.add([
-        ...Object.keys(contexts).map((k) => ({ data: nodeData(k) })),
+        ...keys.map((k) => ({ data: nodeData(k), ...(layout[k] ? { position: { ...layout[k] } } : {}) })),
         ...rels.map((r) => ({ data: { id: r.id, source: r.from, target: r.to, label: r.label || "" },
                               classes: r.directed === false ? "" : "directed" })),
       ]);
-      const opts: cytoscape.LayoutOptions = (reducedMotion()
-        ? { name: "cose", animate: false }
-        : { name: "cola", infinite: true, fit: false, animate: true, nodeSpacing: 18,
-            edgeLength: 135, randomize: false, handleDisconnected: true, avoidOverlap: true }) as cytoscape.LayoutOptions;
-      const layout = cy.layout(opts);
-      layoutRef.current = layout as unknown as { stop: () => void };
-      layout.run();
-      setTimeout(() => cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 350 }), 60);
+      //if every node already has a saved position, place them EXACTLY (preset) — no physics, so they
+      //stay where you left them. otherwise run a springy layout that settles + stops, then save it.
+      const allPlaced = keys.length > 0 && keys.every((k) => layout[k]);
+      const opts: cytoscape.LayoutOptions = (allPlaced
+        ? { name: "preset", fit: false, animate: false }
+        : reducedMotion()
+          ? { name: "cose", animate: false }
+          : { name: "cola", infinite: false, fit: false, animate: true, maxSimulationTime: 2500,
+              nodeSpacing: 18, edgeLength: 135, randomize: false, handleDisconnected: true, avoidOverlap: true }) as cytoscape.LayoutOptions;
+      const layout2 = cy.layout(opts);
+      layoutRef.current = layout2 as unknown as { stop: () => void };
+      layout2.one("layoutstop", () => {
+        cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 300 });
+        if (!allPlaced) savePositions(false); //persist the freshly-arranged layout (not an undoable step)
+      });
+      layout2.run();
     } else {
-      //same shape, content may have changed: refresh labels/sizes/colours without disturbing positions
+      //same shape: refresh labels/sizes/colours, and animate nodes to saved positions when they changed
+      //(this is how undo/redo of a move plays back — the live sim then carries on from there)
       cy.batch(() => Object.keys(contexts).forEach((k) => {
-        const n = cy.getElementById(k); if (n.nonempty()) n.data(nodeData(k));
+        const n = cy.getElementById(k); if (n.empty()) return;
+        n.data(nodeData(k));
+        const p = layout[k];
+        //only react to a real reposition (undo/redo), not tiny live-physics drift since the last save
+        if (p && (Math.abs(n.position("x") - p.x) > 6 || Math.abs(n.position("y") - p.y) > 6)) {
+          n.animate({ position: { x: p.x, y: p.y } }, { duration: 220 });
+        }
       }));
     }
     refresh();
@@ -246,7 +281,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     } as cytoscape.LayoutOptions);
     layoutRef.current = layout as unknown as { stop: () => void };
     layout.run();
-    setTimeout(() => cy.animate({ fit: { eles, padding: 60 }, duration: 320 }), 420);
+    setTimeout(() => { cy.animate({ fit: { eles, padding: 60 }, duration: 320 }); savePositions(true); }, 440);
   }
 
   //legend / filter data: which types are actually present, with counts
