@@ -8,8 +8,8 @@ import type { User } from "./types";
 
 interface UserRow { id: number; username: string; is_admin: boolean }
 
-//settings modal: appearance (live theming), account (change own credentials), and — for the admin —
-//user management. appearance is browser-local; account/users hit the server.
+//settings modal: appearance (live theming), account (change own credentials), and for the admin,
+//user management. appearance is browser-local, account/users hit the server.
 export default function Settings({ me, theme, onThemeChange, onAccountChanged, onClose }: {
   me: User; theme: Theme;
   onThemeChange: (t: Theme) => void; onAccountChanged: () => void; onClose: () => void;

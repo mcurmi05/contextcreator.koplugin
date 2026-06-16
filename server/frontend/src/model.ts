@@ -17,7 +17,7 @@ export function isCustomType(t?: string): boolean {
   return !!t && t !== "unset" && !TYPE_LABELS[t];
 }
 
-//colour for a type. a user override (set via the legend) wins; then fixed built-ins, then a stable
+//colour for a type. a user override (set via the legend) wins, then fixed built-ins, then a stable
 //hue for custom types, then grey for unset.
 export function colorFor(t?: string, overrides?: Record<string, string>): string {
   if (t && overrides && overrides[t]) return overrides[t];

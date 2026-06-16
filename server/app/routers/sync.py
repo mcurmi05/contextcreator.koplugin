@@ -32,7 +32,7 @@ def list_sync_books(user: User = Depends(get_sync_user), session: Session = Depe
 
 @router.get("/books/{book_id}")
 def pull_book(book_id: str, user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
-    #authoritative server copy; an empty doc if we've never seen this book (device merges locally)
+    #authoritative server copy, an empty doc if we've never seen this book (device merges locally)
     row = session.exec(
         select(Book).where(Book.user_id == user.id, Book.book_id == book_id)
     ).first()

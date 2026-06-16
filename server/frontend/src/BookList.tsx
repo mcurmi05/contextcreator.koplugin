@@ -46,8 +46,8 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
     }
   }
 
-  //handle a drop. joining a new series => append at the next free number; dropping within the same
-  //series => reorder around `beforeId` and renumber that series contiguously.
+  //handle a drop. joining a new series appends at the next free number, dropping within the same
+  //series reorders around `beforeId` and renumbers that series contiguously.
   async function moveBook(toSeries: string, beforeId: string | null) {
     setHint(null);
     const id = dragId; setDragId(null);
@@ -86,7 +86,7 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
     );
   }
 
-  //group by series; named series first (alphabetical), unfiled books last
+  //group by series, named series first (alphabetical), unfiled books last
   const groups = new Map<string, BookSummary[]>();
   for (const b of books) {
     const s = b.series || "";

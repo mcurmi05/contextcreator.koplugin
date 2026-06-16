@@ -11,7 +11,7 @@ local socketutil = require("socketutil")
 local rapidjson = require("rapidjson")
 local logger = require("logger")
 
---block timeout / total timeout (seconds) — short so a dead server fails fast
+--block timeout / total timeout (seconds), short so a dead server fails fast
 local BLOCK_TIMEOUT = 10
 local TOTAL_TIMEOUT = 30
 

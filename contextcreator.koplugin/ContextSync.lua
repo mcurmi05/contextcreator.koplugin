@@ -65,7 +65,7 @@ function ContextSync:flush()
 end
 
 --poll the server every PERIODIC_SECONDS while the book is open, so changes made on the web (or
---another device) appear here without a manual sync. reschedules itself; stop with stopPeriodic.
+--another device) appear here without a manual sync. reschedules itself, stop with stopPeriodic.
 function ContextSync:startPeriodic()
     if not self:isConfigured() then return end
     self:stopPeriodic()

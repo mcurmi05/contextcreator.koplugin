@@ -69,7 +69,7 @@ def _merge_points(points_a, points_b, point_tombstones):
             continue
         if pid in point_tombstones:
             continue
-        by_id.setdefault(pid, p)  #first occurrence wins; same id => same content (edits churn ids)
+        by_id.setdefault(pid, p)  #first occurrence wins, same id means same content (edits churn ids)
     #an id-less point matching the text of an id'd one is the SAME point from before it had an id:
     #let the id'd version represent it. this stops a freshly-id'd device point from duplicating the
     #server's old id-less copy, and means the point can then be deleted via its id (tombstone).

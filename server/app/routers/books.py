@@ -69,7 +69,7 @@ def get_book(book_id: str, user: User = Depends(get_current_user), session: Sess
 
 @router.put("/books/{book_id}")
 def replace_book(book_id: str, body: dict, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    #web-authoritative replace of the whole doc — used by undo/redo and node-position saves. unlike the
+    #web-authoritative replace of the whole doc, used by undo/redo and node-position saves. unlike the
     #additive endpoints this sets the document exactly (so undo can genuinely remove things).
     row = _get_row(session, user, book_id)
     doc = _normalize(body or {})

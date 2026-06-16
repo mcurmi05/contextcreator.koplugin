@@ -1,4 +1,4 @@
-//tiny json fetch helper; throws the server's error detail on non-2xx. session cookie rides along.
+//tiny json fetch helper, throws the server's error detail on non-2xx. session cookie rides along.
 export async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },

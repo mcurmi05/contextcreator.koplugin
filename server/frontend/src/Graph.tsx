@@ -1,18 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import cytoscape, { type Core } from "cytoscape";
 import cola from "cytoscape-cola";
-import { colorFor, contextProgress, pointText, pointProgress, typeLabel, TYPE_LABELS } from "./model";
+import { colorFor, contextProgress, typeLabel, TYPE_LABELS } from "./model";
 import { btnGhost } from "./ui";
-import PointItem from "./PointItem";
+import { NodeCard, RelCard } from "./GraphCard";
 import type { GraphPrefs, XY } from "./theme";
-import type { Doc, Point, Selected } from "./types";
+import type { Doc, GraphEditOps, PointRef, Selected } from "./types";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-//ref to locate a point for editing: by stable id when it has one, else by list index
-const pointRef = (p: Point, i: number) => ({ id: typeof p === "object" ? p.id : undefined, index: i });
-
-//<input type=color> needs #rrggbb. built-ins/overrides are already hex; custom types are hsl() — convert.
+//<input type=color> needs #rrggbb. built-ins/overrides are already hex, custom types are hsl() so convert.
 function toHex(c: string): string {
   if (c[0] === "#") return c.length === 4 ? "#" + [...c.slice(1)].map((x) => x + x).join("") : c;
   const m = c.match(/hsl\(\s*([\d.]+)[,\s]+([\d.]+)%[,\s]+([\d.]+)%/i);
@@ -36,15 +33,16 @@ const nodeSize = (n: number) => 28 + Math.min(n * 4, 24);
 //per-book graph. contexts are springy nodes (coloured by type, sized by note count), relationships
 //are edges. hovering spotlights a neighbourhood, selecting pops a note card anchored to the node
 //(rather than just outlining the circle), and the scrub fades in nodes as the story reaches them.
-export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onToggleType, typeColors, onSetTypeColor, onAddPoint, onEditPoint, onMoveNodes, graph, onGraphChange }: {
+export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onToggleType, typeColors, onSetTypeColor, onAddPoint, onEditPoint, onMoveNodes, graph, onGraphChange, ops }: {
   doc: Doc; scrub: number; selected: Selected;
   onSelect: (s: Selected) => void;
   hiddenTypes: Set<string>; onToggleType: (t: string) => void;
   typeColors: Record<string, string>; onSetTypeColor: (t: string, color: string | null) => void;
   onAddPoint: (key: string, text: string) => void;
-  onEditPoint: (key: string, ref: { id?: string; index: number }, text: string) => void;
+  onEditPoint: (key: string, ref: PointRef, text: string) => void;
   onMoveNodes: (positions: Record<string, { x: number; y: number }>, record: boolean) => void;
   graph: GraphPrefs; onGraphChange: (g: GraphPrefs) => void;
+  ops: GraphEditOps;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -71,7 +69,6 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   useEffect(() => { onMoveRef.current = onMoveNodes; }, [onMoveNodes]);
   useEffect(() => { graphRef.current = graph; }, [graph]);
 
-  const [noteText, setNoteText] = useState("");
   const [legendOpen, setLegendOpen] = useState(true);
   const [isFs, setIsFs] = useState(false);               //graph filling the whole screen (fullscreen api)
   const [legendBottom, setLegendBottom] = useState<number | null>(null); //px below container top where the legend ends
@@ -81,7 +78,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   const [dragging, setDragging] = useState<{ which: Which; p: XY } | null>(null);
 
   //drag an overlay (hover button / controls / card / legend) to a new spot in the container. distinguishes
-  //a real drag from a click via a small movement threshold; commits to the shared config on drop.
+  //a real drag from a click via a small movement threshold, commits to the shared config on drop.
   function startDrag(e: React.PointerEvent, el: HTMLElement | null, which: Which) {
     const box = containerRef.current;
     if (!box || !el) return;
@@ -234,7 +231,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   //sync refs + repaint when scrub/filter change (no relayout)
   useEffect(() => { scrubRef.current = scrub; refresh(); }, [scrub]);
   useEffect(() => { hiddenRef.current = hiddenTypes; refresh(); }, [hiddenTypes]);
-  //hover focus on/off lives in the saved config now; mirror it into the ref the hover handler reads, and
+  //hover focus on/off lives in the saved config now, mirror it into the ref the hover handler reads, and
   //when it's switched off drop any live hover spotlight back to the selection's (or none)
   useEffect(() => {
     hoverFocusRef.current = graph.hoverFocusOn;
@@ -274,7 +271,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
         ...rels.map((r) => ({ data: { id: r.id, source: r.from, target: r.to, label: r.label || "" },
                               classes: r.directed === false ? "" : "directed" })),
       ]);
-      //if every node already has a saved position, place them EXACTLY (preset) — no physics, so they
+      //if every node already has a saved position, place them exactly (preset), no physics, so they
       //stay where you left them. otherwise run a springy layout that settles + stops, then save it.
       const allPlaced = keys.length > 0 && keys.every((k) => layout[k]);
       const opts: cytoscape.LayoutOptions = (allPlaced
@@ -292,7 +289,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
       layout2.run();
     } else {
       //same shape: refresh labels/sizes/colours, and animate nodes to saved positions when they changed
-      //(this is how undo/redo of a move plays back — the live sim then carries on from there)
+      //(this is how undo/redo of a move plays back, the live sim then carries on from there)
       cy.batch(() => Object.keys(contexts).forEach((k) => {
         const n = cy.getElementById(k); if (n.empty()) return;
         n.data(nodeData(k));
@@ -398,7 +395,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   ];
 
   //measure where the filter ends so the hover button can default to sitting just beneath it. only when
-  //the filter is shown and at its default (un-dragged) top-left spot; otherwise the hover button uses
+  //the filter is shown and at its default (un-dragged) top-left spot, otherwise the hover button uses
   //its own corner default. recompute when the filter's size/visibility changes.
   const legendShownDefault = present.length > 0 && graph.showLegend && !graph.legendPos;
   useLayoutEffect(() => {
@@ -494,7 +491,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
         </button>
       )}
 
-      {/* zoom / fit / reset / fullscreen controls — drag the grip to reposition, hideable from settings */}
+      {/* zoom / fit / reset / fullscreen controls, drag the grip to reposition, hideable from settings */}
       {graph.showControls && (
         <div ref={controlsRef}
              style={pctStyle(posFor("controls", graph.controlsPos))}
@@ -530,58 +527,19 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
 
   function renderCard() {
     if (!selected) return null;
-    //in fixed mode the card header doubles as a drag handle to reposition the pinned card
-    const fixed = graph.cardMode === "fixed";
-    const headerCls = `flex items-center gap-2 px-3 py-2 border-b border-line ${fixed ? "cursor-grab active:cursor-grabbing select-none touch-none" : ""}`;
-    const onHeaderDown = fixed ? (e: React.PointerEvent) => startDrag(e, cardRef.current, "card") : undefined;
+    //in fixed mode the card gets a drag grip in its header so it can be repositioned
+    const onDrag = graph.cardMode === "fixed" ? (e: React.PointerEvent) => startDrag(e, cardRef.current, "card") : undefined;
     if (selected.kind === "context") {
       const ctx = contexts[selected.id];
       if (!ctx) return null;
-      const submit = () => { if (noteText.trim()) { onAddPoint(selected.id, noteText.trim()); setNoteText(""); } };
       return (
-        <div className="w-72 max-h-[60%] flex flex-col rounded-xl border border-line bg-paper-card shadow-pop overflow-hidden">
-          <div className={headerCls} onPointerDown={onHeaderDown}>
-            <span className="w-3 h-3 rounded-full shrink-0" style={{ background: colorFor(ctx.type, typeColors) }} />
-            <strong className="truncate">{ctx.title}</strong>
-            {typeLabel(ctx.type) && <span className="text-xs text-ink-faint">{typeLabel(ctx.type)}</span>}
-            <span className="flex-1" />
-            <button className="text-ink-faint hover:text-ink transition leading-none text-lg" onClick={() => onSelect(null)}
-                    onPointerDown={(e) => e.stopPropagation()} aria-label="Close">×</button>
-          </div>
-          <ul className="px-4 py-2 space-y-1.5 text-sm overflow-auto">
-            {(ctx.points || []).map((p, i) => (
-              <PointItem key={i} text={pointText(p)} dim={(pointProgress(p) ?? -1) > scrub} editable
-                         onSave={(t) => onEditPoint(selected.id, pointRef(p, i), t)} />
-            ))}
-            {(!ctx.points || ctx.points.length === 0) && <li className="text-ink-faint italic">no notes yet</li>}
-          </ul>
-          <div className="flex gap-1.5 p-2 border-t border-line bg-paper">
-            <input className="flex-1 px-2.5 py-1.5 rounded-lg border border-line bg-paper-card text-sm focus:outline-none focus:border-accent-ring focus:ring-2 focus:ring-accent-ring/30"
-                   placeholder="add a note…" value={noteText}
-                   onChange={(e) => setNoteText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
-            <button className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition" onClick={submit}>Add</button>
-          </div>
-        </div>
+        <NodeCard key={selected.id} ckey={selected.id} ctx={ctx} contexts={contexts}
+                  relationships={doc.relationships || []} typeColors={typeColors} scrub={scrub}
+                  ops={ops} onAddPoint={onAddPoint} onEditPoint={onEditPoint} onSelect={onSelect} onDrag={onDrag} />
       );
     }
     const rel = (doc.relationships || []).find((r) => r.id === selected.id);
     if (!rel) return null;
-    const fromT = contexts[rel.from]?.title || rel.from;
-    const toT = contexts[rel.to]?.title || rel.to;
-    return (
-      <div className="w-72 max-h-[60%] flex flex-col rounded-xl border border-line bg-paper-card shadow-pop overflow-hidden">
-        <div className={headerCls} onPointerDown={onHeaderDown}>
-          <strong className="truncate text-sm">{fromT} {rel.directed === false ? "↔" : "→"} {toT}</strong>
-          <span className="flex-1" />
-          <button className="text-ink-faint hover:text-ink transition leading-none text-lg" onClick={() => onSelect(null)}
-                  onPointerDown={(e) => e.stopPropagation()} aria-label="Close">×</button>
-        </div>
-        {rel.label && <div className="px-4 pt-2 text-sm font-medium text-accent-hover">{rel.label}</div>}
-        <ul className="px-4 py-2 space-y-1.5 text-sm overflow-auto">
-          {(rel.points || []).map((p, i) => <li key={i} className="flex gap-1.5"><span className="text-accent select-none">•</span><span>{pointText(p)}</span></li>)}
-          {(!rel.points || rel.points.length === 0) && <li className="text-ink-faint italic">no notes on this link</li>}
-        </ul>
-      </div>
-    );
+    return <RelCard key={rel.id} rel={rel} contexts={contexts} scrub={scrub} ops={ops} onSelect={onSelect} onDrag={onDrag} />;
   }
 }

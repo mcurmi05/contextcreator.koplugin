@@ -7,7 +7,7 @@ from .config import resolve_secret_key
 from .db import init_db
 from .routers import auth, books, sync, users
 
-#serve the built react app (app/web) when present; fall back to the plain login stub (app/static)
+#serve the built react app (app/web) when present, fall back to the plain login stub (app/static)
 #for local `uvicorn` runs without a frontend build (use `npm run dev` for live frontend work).
 _WEB_DIR = Path(__file__).parent / "web"
 STATIC_DIR = _WEB_DIR if _WEB_DIR.is_dir() else Path(__file__).parent / "static"

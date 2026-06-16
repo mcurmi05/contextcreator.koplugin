@@ -7,15 +7,16 @@ import DetailPanel from "./DetailPanel";
 import { btn } from "./ui";
 import { loadTypeColors, saveTypeColors } from "./typeColors";
 import { downloadJson, readJsonFile, slug } from "./files";
+import * as dq from "./docops";
 import type { GraphPrefs } from "./theme";
-import type { Doc, Selected } from "./types";
+import type { Doc, GraphEditOps, Selected } from "./types";
 
 export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   bookId: string; onBack: () => void; graph: GraphPrefs; onGraphChange: (g: GraphPrefs) => void;
 }) {
   const [doc, setDoc] = useState<Doc | null>(null);
   const [tab, setTab] = useState<"graph" | "browse">("graph");
-  const [scrub, setScrub] = useState(1); //0..1 narrative progress; 1 = show everything
+  const [scrub, setScrub] = useState(1); //0..1 narrative progress, 1 = show everything
   const [selected, setSelected] = useState<Selected>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [typeColors, setTypeColors] = useState<Record<string, string>>(loadTypeColors);
@@ -61,7 +62,7 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
     setUndoStack((s) => [...s, before].slice(-60));
     setRedoStack([]);
   }
-  //web-authoritative replace (used by undo/redo + node-position saves); sets the doc exactly
+  //web-authoritative replace (used by undo/redo + node-position saves), sets the doc exactly
   async function applyReplace(next: Doc) {
     const saved = await api<Doc>("/api/books/" + encodeURIComponent(bookId), { method: "PUT", body: JSON.stringify(next) });
     lastUpdated.current = saved.updated;
@@ -90,13 +91,46 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
       method: "PATCH", body: JSON.stringify({ text, id: ref.id, index: ref.index }),
     }).then(() => {}));
   }
-  //persist node positions from the graph. a user move/reset (record=true) goes on the undo stack; the
+  //persist node positions from the graph. a user move/reset (record=true) goes on the undo stack, the
   //auto-save after an initial arrange (record=false) just persists so reopening resumes the layout.
   async function commitPositions(positions: Record<string, { x: number; y: number }>, record: boolean) {
     if (!doc) return;
     if (record) pushHistory(doc);
     await applyReplace({ ...doc, layout: { ...(doc.layout || {}), ...positions } });
   }
+  //apply a client-side doc edit (clone -> mutate -> web-authoritative PUT), recorded for undo. these
+  //transforms live in docops.ts and mirror the device's tombstone discipline so deletes/renames survive
+  //the sync merge. returns the cloned doc so callers can read the result (e.g. a rename's new key).
+  function mutate(fn: (d: Doc) => void): Doc | null {
+    if (!doc) return null;
+    const next = structuredClone(doc) as Doc;
+    fn(next);
+    pushHistory(doc);
+    void applyReplace(next);
+    return next;
+  }
+
+  const ops: GraphEditOps = {
+    renameContext: (key, title) => {
+      if (!doc) return;
+      const next = structuredClone(doc) as Doc;
+      const newKey = dq.renameContext(next, key, title);
+      pushHistory(doc);
+      void applyReplace(next);
+      if (newKey !== key) setSelected({ kind: "context", id: newKey });
+    },
+    deleteContext: (key) => { mutate((d) => dq.deleteContext(d, key)); setSelected(null); },
+    setType: (key, type) => { mutate((d) => dq.setType(d, key, type)); },
+    deletePoint: (key, ref) => { mutate((d) => dq.deletePoint(d, key, ref)); },
+    createLink: (from, to, label, directed) => { mutate((d) => dq.createLink(d, from, to, label, directed)); },
+    editLinkLabel: (id, label) => { mutate((d) => dq.editLinkLabel(d, id, label)); },
+    setLinkDirection: (id, from, to, directed) => { mutate((d) => dq.setLinkDirection(d, id, from, to, directed)); },
+    deleteLink: (id) => { mutate((d) => dq.deleteLink(d, id)); setSelected(null); },
+    addRelPoint: (id, text) => { mutate((d) => dq.addRelPoint(d, id, text)); },
+    editRelPoint: (id, ref, text) => { mutate((d) => dq.editRelPoint(d, id, ref, text)); },
+    deleteRelPoint: (id, ref) => { mutate((d) => dq.deleteRelPoint(d, id, ref)); },
+  };
+
   async function undo() {
     if (!undoStack.length || !doc) return;
     const prev = undoStack[undoStack.length - 1];
@@ -180,7 +214,7 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
           <Graph doc={doc} scrub={scrub} selected={selected} onSelect={setSelected}
                  hiddenTypes={hiddenTypes} onToggleType={toggleType} typeColors={typeColors} onSetTypeColor={setTypeColor}
                  onAddPoint={addPoint} onEditPoint={editPoint} onMoveNodes={commitPositions}
-                 graph={graph} onGraphChange={onGraphChange} />
+                 graph={graph} onGraphChange={onGraphChange} ops={ops} />
         ) : (
           <div className="h-full flex gap-3 items-start overflow-hidden">
             <div className="flex-1 min-w-0 h-full overflow-auto pr-1">

@@ -16,7 +16,7 @@ def now():
 
 
 def gen_id():
-    #web-origin point id; just needs to be unique (the "w" prefix marks where it came from)
+    #web-origin point id, just needs to be unique (the "w" prefix marks where it came from)
     return "w-" + secrets.token_hex(8)
 
 
@@ -35,7 +35,7 @@ def normalize_word(word):
 
 
 def ensure_context(doc, title, type_=None):
-    #create (or touch) a context for `title`; returns its key, or None if the title is empty
+    #create (or touch) a context for `title`, returns its key, or None if the title is empty
     _normalize(doc)
     key = normalize_word(title)
     if not key:
@@ -59,7 +59,7 @@ def ensure_context(doc, title, type_=None):
 
 
 def add_point(doc, key, text):
-    #append a dot point to an existing context; returns True if it landed
+    #append a dot point to an existing context, returns True if it landed
     _normalize(doc)
     ctx = doc["contexts"].get(key)
     if not ctx or not text:
@@ -74,7 +74,7 @@ def add_point(doc, key, text):
 
 def edit_point(doc, key, text, point_id=None, index=None):
     #change a dot point's text in place, keeping its id so the merge treats it as the same point
-    #(a one-sided edit wins by being the merge base; a concurrent device edit churns its own id and
+    #(a one-sided edit wins by being the merge base, a concurrent device edit churns its own id and
     #still wins). returns True if a point was found and changed.
     _normalize(doc)
     ctx = doc["contexts"].get(key)

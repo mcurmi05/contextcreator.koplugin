@@ -12,7 +12,7 @@ from .security import verify_password
 
 
 def admin_user_id(session: Session) -> int | None:
-    #the first account created (lowest id) is the admin — no schema flag needed
+    #the first account created (lowest id) is the admin, no schema flag needed
     return session.exec(select(User.id).order_by(User.id)).first()
 
 
@@ -35,7 +35,7 @@ def get_current_user(request: Request, session: Session = Depends(get_session)) 
 
 
 def get_sync_user(request: Request, session: Session = Depends(get_session)) -> User:
-    #the plugin sends `Authorization: Basic base64(username:password)`; verify against the account.
+    #the plugin sends `Authorization: Basic base64(username:password)`, verify against the account.
     #falls back to a logged-in web session so the frontend can hit sync endpoints too.
     header = request.headers.get("authorization", "")
     if header.lower().startswith("basic "):

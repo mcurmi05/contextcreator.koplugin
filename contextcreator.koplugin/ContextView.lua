@@ -160,6 +160,24 @@ function ContextView:new(store)
     return setmetatable({ store = store }, ContextView)
 end
 
+--whether to hide context info from beyond the current reading position (contexts not yet introduced,
+--and dot points noted ahead of where you are). on by default so the book doesn't spoil itself; the
+--choice is saved to G_reader_settings so it persists across books and restarts.
+function ContextView:getOnlyRead()
+    local v = G_reader_settings:readSetting("contextcreator_only_read")
+    if v == nil then return true end
+    return v
+end
+
+function ContextView:setOnlyRead(v)
+    G_reader_settings:saveSetting("contextcreator_only_read", v and true or false)
+end
+
+--a dot point's 0..1 progress, or nil if it isn't anchored (legacy/imported points)
+local function pointProgress(point)
+    return type(point) == "table" and type(point.progress) == "number" and point.progress or nil
+end
+
 
 --editing
 
@@ -193,7 +211,7 @@ function ContextView:findSimilarNodes(doc, word)
 end
 
 --resolve a highlighted word to a node, then start adding a dot point to it.
---an exact (normalized) match goes straight to a new dot point; fuzzy look-alikes go through the chooser.
+--an exact (normalized) match goes straight to a new dot point, fuzzy look-alikes go through the chooser.
 --pos is the book locator of the highlight, carried so the new point can be anchored to it.
 function ContextView:showEntryEditor(word, pos)
     local key = ContextText.normalizeWord(word)
@@ -342,7 +360,7 @@ function ContextView:chooseTypeForNewContext(key, title, pos)
     local doc = self.store:load()
     local dialog
     --apply the chosen type then go to the first dot point. a real/custom type is saved up front so the
-    --context sticks even before a point is added; unset is left unsaved (the node gets created when
+    --context sticks even before a point is added, unset is left unsaved (the node gets created when
     --the first point lands, or when "Skip for now" is tapped on the dot point page)
     local function pickType(t)
         if t ~= "unset" then
@@ -425,13 +443,30 @@ function ContextView:showPointsList(key)
     if not node then return end
     local points = node.points
 
+    --by default hide dot points noted beyond the current reading position, so the notes don't spoil
+    --what's ahead. the choice is the same persisted setting used by the all-contexts filter.
+    local progress = self.store:describeLocator(nil).progress
+    local only_read = self:getOnlyRead() and progress ~= nil
+
     local items = {}
+    local hidden = 0
     for i, point in ipairs(points) do
-        --dot points are about what you're learning, not bookmarks, so no page shown here.
-        --the location is still stored (long-press a point -> "Go to location" to jump there).
+        local pp = pointProgress(point)
+        if only_read and pp and pp > progress + 1e-6 then
+            hidden = hidden + 1 --noted ahead of where we are, keep it out of sight (index i still maps in node.points)
+        else
+            --dot points are about what you're learning, not bookmarks, so no page shown here.
+            --the location is still stored (long-press a point -> "Go to location" to jump there).
+            table.insert(items, {
+                text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " "), --collapse multi line points to one line
+                _index = i,
+            })
+        end
+    end
+    if hidden > 0 then
         table.insert(items, {
-            text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " "), --collapse multi line points to one line
-            _index = i,
+            text = T(_("\u{2026} %1 later note(s) hidden \u{00B7} up to %2%"), hidden, math.floor(progress * 100 + 0.5)),
+            _info = true, --not a real point, just a notice
         })
     end
 
@@ -447,10 +482,12 @@ function ContextView:showPointsList(key)
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false, --keep the border but drop Menus rounded corners
         onMenuSelect = function(_self, item)
+            if item._info then return end --the "later notes hidden" notice isn't tappable
             UIManager:close(menu)
             self:editPoint(key, node.title, item._index)
         end,
         onMenuHold = function(_self, item)
+            if item._info then return true end
             self:showPointActions(menu, key, item._index)
             return true
         end,
@@ -674,11 +711,11 @@ function ContextView:showAllContexts()
     --how far the reader has read (0..1), used by the "only up to here" filter. nil if we can't tell,
     --in which case the filter is unavailable and we just show everything.
     local progress = self.store:describeLocator(nil).progress
-    local only_read = self._only_read and progress ~= nil
+    local only_read = self:getOnlyRead() and progress ~= nil
 
     local filter_fn = only_read and function(_key, node)
         local intro = contextIntroProgress(node)
-        --keep contexts introduced at or before here; ones with no known spot stay visible (can't place them)
+        --keep contexts introduced at or before here, ones with no known spot stay visible (can't place them)
         return intro == nil or intro <= progress + 1e-6
     end or nil
 
@@ -705,8 +742,8 @@ function ContextView:showAllContexts()
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false, --keep the border but drop Menus rounded corners
         onMenuSelect = function(_self, item)
-            if item._toggle then --flip the filter and rebuild the list in place
-                self._only_read = not self._only_read
+            if item._toggle then --flip the (persisted) filter and rebuild the list in place
+                self:setOnlyRead(not self:getOnlyRead())
                 UIManager:close(menu)
                 self:showAllContexts()
                 return
@@ -928,7 +965,7 @@ function ContextView:setNodeType(menu, key)
     UIManager:show(dialog)
 end
 
---rename a node. if the new name normalizes onto an existing node, merge into it (and repoint links);
+--rename a node. if the new name normalizes onto an existing node, merge into it (and repoint links),
 --otherwise the node moves to the new key. the old key is tombstoned either way.
 function ContextView:renameNode(menu, key)
     local doc = self.store:load()
@@ -1100,7 +1137,7 @@ function ContextView:askDirection(label, a_key, b_key, on_pick)
     UIManager:show(dialog)
 end
 
---list relationships. key == nil lists every link in the book; otherwise only those touching that node.
+--list relationships. key == nil lists every link in the book, otherwise only those touching that node.
 function ContextView:showRelationships(key)
     local doc = self.store:load()
     local items = {}
@@ -1152,11 +1189,27 @@ function ContextView:showRelationshipView(rel_id)
     local rel = ContextSchema.findRel(doc, rel_id)
     if not rel then return end
 
+    --like the context points list, hide link notes from beyond the current reading position by default
+    local progress = self.store:describeLocator(nil).progress
+    local only_read = self:getOnlyRead() and progress ~= nil
+
     local items = {}
+    local hidden = 0
     for i, point in ipairs(rel.points) do
+        local pp = pointProgress(point)
+        if only_read and pp and pp > progress + 1e-6 then
+            hidden = hidden + 1
+        else
+            table.insert(items, {
+                text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " "),
+                _index = i,
+            })
+        end
+    end
+    if hidden > 0 then
         table.insert(items, {
-            text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " "),
-            _index = i,
+            text = T(_("\u{2026} %1 later note(s) hidden \u{00B7} up to %2%"), hidden, math.floor(progress * 100 + 0.5)),
+            _info = true,
         })
     end
 
@@ -1168,10 +1221,12 @@ function ContextView:showRelationshipView(rel_id)
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false,
         onMenuSelect = function(_self, item)
+            if item._info then return end
             UIManager:close(menu)
             self:editRelPoint(rel_id, item._index)
         end,
         onMenuHold = function(_self, item)
+            if item._info then return true end
             self:showRelPointActions(menu, rel_id, item._index)
             return true
         end,

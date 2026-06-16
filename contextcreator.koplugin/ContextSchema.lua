@@ -17,7 +17,7 @@ doc shape:
     -- { page = N } table) for on-device jump-back. progress is a 0..1 fraction through the book = the
     -- universal timeline axis the webapp scrubs. chapter is the TOC title there. any of pos/progress/chapter
     -- may be nil. context-level progress/chapter anchor a context that has no located points.
-    relationships = { { id, from, to, label, directed, points, updated }, ... },  -- directed=false means no arrow; missing means directed (made before undirected existed)
+    relationships = { { id, from, to, label, directed, points, updated }, ... },  -- directed=false means no arrow, missing means directed (made before undirected existed)
     tombstones = { contexts = { [key] = <epoch> }, relationships = { [id] = <epoch> }, points = { [id] = <epoch> } },
   }
 ]]
