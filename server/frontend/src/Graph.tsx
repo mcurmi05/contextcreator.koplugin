@@ -92,15 +92,35 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     const elRect = el.getBoundingClientRect();
     const grabX = e.clientX - elRect.left, grabY = e.clientY - elRect.top;
     const w = elRect.width, h = elRect.height;
+    const boxW = boxRect.width, boxH = boxRect.height;
     const startX = e.clientX, startY = e.clientY;
-    let moved = false, last: XY = { x: elRect.left - boxRect.left, y: elRect.top - boxRect.top };
-    last = { x: last.x / boxRect.width, y: last.y / boxRect.height };
+
+    //the other draggable overlays this one mustn't be dropped on top of. captured up front (they don't
+    //move during the drag), as rects relative to the container. no gap, they can sit flush together.
+    const GAP = 0;
+    const obstacles = ([hoverBtnRef.current, controlsRef.current, legendRef.current]
+      .filter((o) => o && o !== el) as HTMLElement[])
+      .map((o) => { const r = o.getBoundingClientRect(); return { x: r.left - boxRect.left, y: r.top - boxRect.top, w: r.width, h: r.height }; });
+    const hits = (l: number, t: number) =>
+      obstacles.some((r) => l < r.x + r.w + GAP && l + w > r.x - GAP && t < r.y + r.h + GAP && t + h > r.y - GAP);
+
+    let moved = false;
+    let lastPx = { x: elRect.left - boxRect.left, y: elRect.top - boxRect.top };
+    let last: XY = { x: lastPx.x / boxW, y: lastPx.y / boxH };
     const onMove = (ev: PointerEvent) => {
       if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
       moved = true;
-      const left = clamp(ev.clientX - boxRect.left - grabX, 0, Math.max(0, boxRect.width - w));
-      const top = clamp(ev.clientY - boxRect.top - grabY, 0, Math.max(0, boxRect.height - h));
-      last = { x: left / boxRect.width, y: top / boxRect.height };
+      let nx = clamp(ev.clientX - boxRect.left - grabX, 0, Math.max(0, boxW - w));
+      let ny = clamp(ev.clientY - boxRect.top - grabY, 0, Math.max(0, boxH - h));
+      //if that spot would overlap another overlay, slide along it (keep one axis at the last good value),
+      //and if it's fully boxed in just hold the last good spot
+      if (hits(nx, ny)) {
+        if (!hits(nx, lastPx.y)) ny = lastPx.y;
+        else if (!hits(lastPx.x, ny)) nx = lastPx.x;
+        else { nx = lastPx.x; ny = lastPx.y; }
+      }
+      lastPx = { x: nx, y: ny };
+      last = { x: nx / boxW, y: ny / boxH };
       setDragging({ which, p: last });
     };
     const onUp = () => {
