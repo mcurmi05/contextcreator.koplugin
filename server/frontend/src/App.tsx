@@ -10,6 +10,22 @@ import type { User } from "./types";
 
 type Phase = "loading" | "auth" | "books" | "book";
 
+//the default brand mark as an svg data url, used for the favicon when no custom logo is set
+const DEFAULT_MARK_SVG =
+  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'>" +
+  "<circle cx='5' cy='6' r='2.4' fill='#4F46E5'/><circle cx='18' cy='9' r='2.4' fill='#0E9F6E'/>" +
+  "<circle cx='9' cy='18' r='2.4' fill='#C2620B'/>" +
+  "<path d='M6.8 7.2 16.2 8.6M7 8 8.6 16M16.4 10.6 10.4 16.4' stroke='#A8A29E' stroke-width='1.3' stroke-linecap='round'/></svg>";
+const DEFAULT_FAVICON = "data:image/svg+xml," + encodeURIComponent(DEFAULT_MARK_SVG);
+
+//point the browser tab's favicon (and title) at the webapp's logo/title
+function applyTabBranding(logo: string | null, title: string) {
+  let link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+  if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+  link.href = logo || DEFAULT_FAVICON;
+  document.title = title || "Context Creator";
+}
+
 //little node-graph glyph, the default brand mark when no custom logo is set
 function Mark() {
   return (
@@ -38,7 +54,7 @@ export default function App() {
   const [theme, setThemeState] = useState<Theme>(loadTheme);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  useEffect(() => { applyTheme(theme); }, [theme]);
+  useEffect(() => { applyTheme(theme); applyTabBranding(theme.logo, theme.title); }, [theme]);
   function setTheme(t: Theme) { setThemeState(t); saveTheme(t); applyTheme(t); }
 
   async function checkAuth() {
