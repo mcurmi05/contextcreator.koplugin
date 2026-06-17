@@ -1,6 +1,7 @@
 #a user's synced books, plus simple view/edit endpoints the web ui uses to add contexts and dot
 #points (so you can test that web -> device sync works too). all session-authed (the logged-in user).
 import json
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -9,8 +10,8 @@ from sqlmodel import Session, select
 from .. import docops
 from ..db import get_session
 from ..deps import get_current_user
-from ..models import Book, User
-from ..sync import _normalize, merge
+from ..models import Book, LibraryEntry, User
+from ..sync import _normalize, merge, new_doc
 
 router = APIRouter(prefix="/api", tags=["books"])
 
@@ -18,10 +19,12 @@ router = APIRouter(prefix="/api", tags=["books"])
 class ContextIn(BaseModel):
     title: str
     type: str | None = None
+    progress: float | None = None  #0..1 timeline spot the web ui was scrubbed to when adding
 
 
 class PointIn(BaseModel):
     text: str
+    progress: float | None = None
 
 
 class PointEdit(BaseModel):
@@ -56,7 +59,7 @@ def list_books(user: User = Depends(get_current_user), session: Session = Depend
     books = session.exec(select(Book).where(Book.user_id == user.id)).all()
     return [
         {"book_id": b.book_id, "title": b.title, "authors": b.authors,
-         "series": b.series, "series_index": b.series_index, "updated": b.updated}
+         "series": b.series, "series_index": b.series_index, "source": b.source, "updated": b.updated}
         for b in books
     ]
 
@@ -169,11 +172,90 @@ def import_book(book_id: str, body: dict, user: User = Depends(get_current_user)
     return merged
 
 
+@router.post("/external")
+def import_external(body: dict, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #import a standalone contexts file (shared by someone else) as a web-only book, not tied to any device.
+    #accepts a single book doc or an export bundle; each doc becomes its own "Imported" entry.
+    docs = []
+    items = body.get("books") if isinstance(body, dict) else None
+    if isinstance(items, list):
+        for it in items:
+            d = it.get("doc") if isinstance(it, dict) and isinstance(it.get("doc"), dict) else None
+            if d:
+                docs.append((it.get("title"), it.get("authors"), d))
+    elif isinstance(body, dict) and isinstance(body.get("contexts"), dict):
+        docs.append((None, None, body))
+    if not docs:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unrecognized contexts file")
+    created = []
+    for title, authors, d in docs:
+        doc = _normalize(d)
+        doc["updated"] = docops.now()
+        meta = doc.get("book") or {}
+        bid = "ext-" + secrets.token_hex(8)
+        row = Book(user_id=user.id, book_id=bid, source="external",
+                   title=title or meta.get("title") or "Imported contexts",
+                   authors=authors or meta.get("authors") or "",
+                   doc_json=json.dumps(doc), updated=doc["updated"])
+        session.add(row)
+        created.append(bid)
+    session.commit()
+    return {"imported": len(created), "book_ids": created}
+
+
+@router.post("/books/{target_id}/attach/{external_id}")
+def attach_external(target_id: str, external_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #merge an imported (external) doc into an existing book, then drop the external entry. additive merge
+    #keeps everything; the target book keeps its own identity (id/title/toc), it just gains the contexts.
+    target = _get_row(session, user, target_id)
+    ext = session.exec(select(Book).where(Book.user_id == user.id, Book.book_id == external_id)).first()
+    if not ext:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="imported doc not found")
+    tgt_doc = json.loads(target.doc_json)
+    merged = merge(tgt_doc, json.loads(ext.doc_json))
+    merged["book"] = tgt_doc.get("book") or merged.get("book") or {}  #keep the target book's identity
+    target.doc_json = json.dumps(merged)
+    target.updated = merged.get("updated") or target.updated
+    session.delete(ext)
+    session.commit()
+    return merged
+
+
+@router.get("/library")
+def list_library(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #books known to be on the device (from its read history) that don't have a contexts book yet, so the
+    #web ui can offer to start one
+    have = set(session.exec(select(Book.book_id).where(Book.user_id == user.id)).all())
+    rows = session.exec(select(LibraryEntry).where(LibraryEntry.user_id == user.id)).all()
+    return [{"book_id": r.book_id, "title": r.title, "authors": r.authors}
+            for r in rows if r.book_id not in have]
+
+
+@router.post("/library/{book_id}/adopt")
+def adopt_library_book(book_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #start a (device-bound) contexts book for a device book that has none yet. on the next sync the device
+    #merges in whatever you add here. returns the fresh doc so the web ui can open it.
+    existing = session.exec(select(Book).where(Book.user_id == user.id, Book.book_id == book_id)).first()
+    if existing:
+        return json.loads(existing.doc_json)
+    entry = session.exec(select(LibraryEntry).where(LibraryEntry.user_id == user.id, LibraryEntry.book_id == book_id)).first()
+    title = entry.title if entry else ""
+    authors = entry.authors if entry else ""
+    doc = new_doc()
+    doc["book"] = {"id": book_id, "title": title, "authors": authors}
+    doc["updated"] = docops.now()
+    row = Book(user_id=user.id, book_id=book_id, title=title, authors=authors,
+               source="device", doc_json=json.dumps(doc), updated=doc["updated"])
+    session.add(row)
+    session.commit()
+    return doc
+
+
 @router.post("/books/{book_id}/contexts")
 def add_context(book_id: str, body: ContextIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     row = _get_row(session, user, book_id)
     doc = json.loads(row.doc_json)
-    key = docops.ensure_context(doc, body.title, body.type)
+    key = docops.ensure_context(doc, body.title, body.type, body.progress)
     if not key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="title required")
     return _save(session, row, doc)
@@ -183,7 +265,7 @@ def add_context(book_id: str, body: ContextIn, user: User = Depends(get_current_
 def add_point(book_id: str, key: str, body: PointIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     row = _get_row(session, user, book_id)
     doc = json.loads(row.doc_json)
-    if not docops.add_point(doc, key, body.text):
+    if not docops.add_point(doc, key, body.text, body.progress):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="context not found or empty text")
     return _save(session, row, doc)
 

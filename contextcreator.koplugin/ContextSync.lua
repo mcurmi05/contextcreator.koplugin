@@ -125,6 +125,47 @@ function ContextSync:syncNow(interactive)
     end
 end
 
+--build the device's book catalog from its read history: { book_id, title, authors } for each book we
+--can find a sync id (partial md5) for. lets the web ui offer to start contexts for books with no notes.
+function ContextSync:buildLibrary()
+    local ok, ReadHistory = pcall(require, "readhistory")
+    if not ok or not ReadHistory or not ReadHistory.hist then return {} end
+    local DocSettings = require("docsettings")
+    local util = require("util")
+    local out, seen = {}, {}
+    for i = 1, #ReadHistory.hist do
+        if #out >= 250 then break end --keep it bounded on big histories
+        local file = ReadHistory.hist[i] and ReadHistory.hist[i].file
+        if file then
+            local okd, ds = pcall(function() return DocSettings:open(file) end)
+            if okd and ds then
+                local md5 = ds:readSetting("partial_md5_checksum")
+                if md5 and not seen[md5] then
+                    seen[md5] = true
+                    local props = ds:readSetting("doc_props") or {}
+                    local title = props.display_title or props.title
+                    if not title or title == "" then
+                        local _p, name = util.splitFilePathName(file)
+                        title = name
+                    end
+                    out[#out + 1] = { book_id = md5, title = title or "", authors = props.authors or props.author or "" }
+                end
+            end
+        end
+    end
+    return out
+end
+
+--push the read-history catalog to the server (best-effort, like the rest of sync)
+function ContextSync:syncLibrary()
+    if not self:isConfigured() then return end
+    if NetworkMgr and NetworkMgr.isConnected and not NetworkMgr:isConnected() then return end
+    local books = self:buildLibrary()
+    if #books == 0 then return end
+    local s = self:settings()
+    ContextSyncClient:new(s.server, s.username, s.password):pushLibrary(books)
+end
+
 --a single text setting (server url / token), edited through an input dialog
 --one login window: server URL + username + password together (password masked, kept if left blank).
 --saving logs in (enables sync) and does an immediate sync so the user gets instant feedback.

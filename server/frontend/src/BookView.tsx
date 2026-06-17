@@ -76,14 +76,16 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
     pushHistory(before);
   }
 
+  //new contexts/points are anchored to where the timeline is scrubbed to right now, so they show up at
+  //that spot in the story (matching how the device anchors to the reading position)
   async function addContext(title: string, type: string) {
     await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/contexts`, {
-      method: "POST", body: JSON.stringify({ title, type }),
+      method: "POST", body: JSON.stringify({ title, type, progress: scrub }),
     }).then(() => {}));
   }
   async function addPoint(key: string, text: string) {
     await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/contexts/${encodeURIComponent(key)}/points`, {
-      method: "POST", body: JSON.stringify({ text }),
+      method: "POST", body: JSON.stringify({ text, progress: scrub }),
     }).then(() => {}));
   }
   async function editPoint(key: string, ref: { id?: string; index: number }, text: string) {

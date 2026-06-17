@@ -53,6 +53,8 @@ function ContextCreator:init()
         --pull server changes shortly after the book opens (don't block the open), then keep polling
         --periodically so web/other-device edits show up without a manual sync
         UIManager:scheduleIn(1, function() self.sync:syncNow() end)
+        --report the device's book catalog so the web ui can start contexts for un-noted books
+        UIManager:scheduleIn(3, function() self.sync:syncLibrary() end)
         self.sync:startPeriodic()
     end
 

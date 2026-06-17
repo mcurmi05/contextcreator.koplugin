@@ -79,4 +79,10 @@ function ContextSyncClient:pullBook(book_id)
     return self:request("GET", "/api/sync/books/" .. book_id)
 end
 
+--report the device's book catalog (a list of { book_id, title, authors }) so the web ui can offer to
+--start contexts for books that have no notes yet
+function ContextSyncClient:pushLibrary(books)
+    return self:request("POST", "/api/sync/library", rapidjson.array(books))
+end
+
 return ContextSyncClient

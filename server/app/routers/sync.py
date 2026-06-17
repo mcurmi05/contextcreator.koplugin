@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from ..db import get_session
 from ..deps import get_sync_user
-from ..models import Book, User
+from ..models import Book, LibraryEntry, User
 from ..sync import merge, new_doc
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
@@ -25,9 +25,33 @@ def _load_doc(row: Book | None):
 
 @router.get("/books")
 def list_sync_books(user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
-    #cheap "what do you have and how fresh" list so the device knows what to pull
-    rows = session.exec(select(Book).where(Book.user_id == user.id)).all()
+    #cheap "what do you have and how fresh" list so the device knows what to pull. web-only imported
+    #books are left out, they don't belong on any device.
+    rows = session.exec(select(Book).where(Book.user_id == user.id, Book.source == "device")).all()
     return [{"book_id": r.book_id, "updated": r.updated} for r in rows]
+
+
+@router.post("/library")
+def push_library(body: list[dict], user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
+    #the device reports its read-history catalog (book_id + title) so the web ui can offer to start a
+    #context for a book that has no notes yet. upsert by book_id, scoped to the user.
+    seen = 0
+    for it in body or []:
+        bid = it.get("book_id")
+        if not bid:
+            continue
+        seen += 1
+        row = session.exec(
+            select(LibraryEntry).where(LibraryEntry.user_id == user.id, LibraryEntry.book_id == bid)
+        ).first()
+        if row:
+            row.title = it.get("title") or row.title
+            row.authors = it.get("authors") or row.authors
+        else:
+            session.add(LibraryEntry(user_id=user.id, book_id=bid,
+                                     title=it.get("title") or "", authors=it.get("authors") or ""))
+    session.commit()
+    return {"ok": True, "count": seen}
 
 
 @router.get("/books/{book_id}")

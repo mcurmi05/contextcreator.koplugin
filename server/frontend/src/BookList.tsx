@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { readJsonFile } from "./files";
 import { btn, btnAccent, input } from "./ui";
-import type { BookSummary } from "./types";
+import type { BookSummary, LibraryEntry } from "./types";
 
 const byOrder = (a: BookSummary, b: BookSummary) =>
   (a.series_index ?? 0) - (b.series_index ?? 0) || (a.title || "").localeCompare(b.title || "");
 
+const isExternal = (b: BookSummary) => b.source === "external";
+
 export default function BookList({ onOpen }: { onOpen: (bookId: string) => void }) {
   const [books, setBooks] = useState<BookSummary[] | null>(null);
+  const [library, setLibrary] = useState<LibraryEntry[]>([]);
+  const [libOpen, setLibOpen] = useState(false);
+  const [attachFor, setAttachFor] = useState<string | null>(null); //external book_id being attached
   const [editing, setEditing] = useState<string | null>(null);  //book_id whose series is being edited
   const [name, setName] = useState("");
   const [pos, setPos] = useState("");
@@ -15,35 +21,35 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
   const [dragId, setDragId] = useState<string | null>(null);
   const [hint, setHint] = useState<{ series: string; before: string | null } | null>(null);
 
-  const load = () => api<BookSummary[]>("/api/books").then(setBooks).catch(() => setBooks([]));
+  const load = async () => {
+    try { setBooks(await api<BookSummary[]>("/api/books")); } catch { setBooks([]); }
+    try { setLibrary(await api<LibraryEntry[]>("/api/library")); } catch { /* ignore */ }
+  };
   useEffect(() => {
     let alive = true;
-    const tick = () => api<BookSummary[]>("/api/books").then((b) => alive && setBooks(b)).catch(() => alive && setBooks([]));
+    const tick = async () => {
+      try { const b = await api<BookSummary[]>("/api/books"); if (alive) setBooks(b); } catch { if (alive) setBooks((p) => p ?? []); }
+      try { const l = await api<LibraryEntry[]>("/api/library"); if (alive) setLibrary(l); } catch { /* ignore */ }
+    };
     void tick();
-    const t = setInterval(tick, 5000); //pick up newly-synced books
+    const t = setInterval(tick, 5000); //pick up newly-synced books + library updates
     return () => { alive = false; clearInterval(t); };
   }, []);
 
   const patchMeta = (bookId: string, series: string, series_index: number) =>
     api(`/api/books/${encodeURIComponent(bookId)}/meta`, { method: "PATCH", body: JSON.stringify({ series, series_index }) });
 
-  //the next free position in a series (one past the highest existing one)
+  //the next free position in a series (one past the highest existing one), device books only
   const nextIndex = (series: string, excludeId?: string) =>
-    (books || []).filter((b) => (b.series || "") === series && b.book_id !== excludeId)
+    (books || []).filter((b) => !isExternal(b) && (b.series || "") === series && b.book_id !== excludeId)
       .reduce((m, b) => Math.max(m, b.series_index ?? 0), -1) + 1;
 
-  //save the series + (optional 1-based) position typed into the inline editor
   async function saveSeries(bookId: string) {
     setError("");
     const s = name.trim();
-    const idx = pos.trim() ? Math.max(0, (parseInt(pos, 10) || 1) - 1) : nextIndex(s, bookId); //blank => next free
-    try {
-      await patchMeta(bookId, s, idx);
-      setEditing(null);
-      await load();
-    } catch (e) {
-      setError((e as Error).message || "couldn't save — is the server up to date?");
-    }
+    const idx = pos.trim() ? Math.max(0, (parseInt(pos, 10) || 1) - 1) : nextIndex(s, bookId);
+    try { await patchMeta(bookId, s, idx); setEditing(null); await load(); }
+    catch (e) { setError((e as Error).message || "couldn't save — is the server up to date?"); }
   }
 
   //handle a drop. joining a new series appends at the next free number, dropping within the same
@@ -54,12 +60,11 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
     if (!id || !books) return;
     const drag = books.find((b) => b.book_id === id);
     if (!drag) return;
-
     try {
       if ((drag.series || "") !== toSeries) {
         await patchMeta(id, toSeries, nextIndex(toSeries, id));
       } else {
-        const ordered = books.filter((b) => (b.series || "") === toSeries && b.book_id !== id).sort(byOrder);
+        const ordered = books.filter((b) => !isExternal(b) && (b.series || "") === toSeries && b.book_id !== id).sort(byOrder);
         let at = ordered.length;
         if (beforeId) { const i = ordered.findIndex((b) => b.book_id === beforeId); if (i >= 0) at = i; }
         ordered.splice(at, 0, drag);
@@ -71,24 +76,38 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
         await Promise.all(patches);
       }
       await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  //adopt a device-library book (no notes yet): server makes a doc for it, then we open it
+  async function adopt(bookId: string) {
+    setError("");
+    try { await api(`/api/library/${encodeURIComponent(bookId)}/adopt`, { method: "POST" }); await load(); onOpen(bookId); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  //import a standalone contexts file as a web-only "Imported" book
+  async function importExternal(file: File) {
+    setError("");
+    try { await api("/api/external", { method: "POST", body: JSON.stringify(await readJsonFile(file)) }); await load(); }
+    catch (e) { setError("Import failed: " + (e as Error).message); }
+  }
+
+  //merge an imported doc into one of your real books, then it's gone from Imported
+  async function attach(externalId: string, targetId: string) {
+    setError("");
+    try { await api(`/api/books/${encodeURIComponent(targetId)}/attach/${encodeURIComponent(externalId)}`, { method: "POST" }); setAttachFor(null); await load(); }
+    catch (e) { setError((e as Error).message); }
   }
 
   if (!books) return <p className="text-ink-faint">Loading…</p>;
-  if (books.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-line-strong bg-paper-card p-8 text-center">
-        <p className="font-medium">No books synced yet</p>
-        <p className="text-sm text-ink-faint mt-1">Sync from KOReader and your books will show up here.</p>
-      </div>
-    );
-  }
 
-  //group by series, named series first (alphabetical), unfiled books last
+  const deviceBooks = books.filter((b) => !isExternal(b));
+  const externalBooks = books.filter(isExternal);
+
+  //group device books by series, named series first (alphabetical), unfiled books last
   const groups = new Map<string, BookSummary[]>();
-  for (const b of books) {
+  for (const b of deviceBooks) {
     const s = b.series || "";
     if (!groups.has(s)) groups.set(s, []);
     groups.get(s)!.push(b);
@@ -98,12 +117,45 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
 
   return (
     <div>
+      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+
       <div className="flex items-baseline gap-2 mb-1">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-faint">Your books</h2>
         <span className="text-xs text-ink-faint">drag a book onto a series, or between books to reorder</span>
       </div>
       <datalist id="series-list">{named.map((s) => <option key={s} value={s} />)}</datalist>
-      {error && <p className="text-red-600 text-sm mb-2">{error}</p>}
+
+      {/* books on the device that don't have contexts yet — start one from here */}
+      {library.length > 0 && (
+        <div className="mb-5 rounded-xl border border-line bg-paper-card overflow-hidden">
+          <button className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-paper-sunk transition"
+                  onClick={() => setLibOpen((v) => !v)}>
+            <span className="text-sm font-medium">Other books on your device</span>
+            <span className="text-xs text-ink-faint tabular-nums">{library.length}</span>
+            <span className="flex-1" />
+            <span className="text-ink-faint text-xs">{libOpen ? "▾" : "▸"} no notes yet</span>
+          </button>
+          {libOpen && (
+            <div className="px-3 pb-3 pt-1 flex flex-wrap gap-2">
+              {library.map((e) => (
+                <button key={e.book_id} onClick={() => adopt(e.book_id)}
+                        className="w-56 text-left rounded-lg border border-line px-3 py-2 hover:border-accent-ring hover:shadow-card transition">
+                  <strong className="block truncate text-sm">{e.title || e.book_id}</strong>
+                  {e.authors && <span className="block text-xs text-ink-faint truncate">{e.authors}</span>}
+                  <span className="block text-[11px] text-accent-hover mt-1">+ start contexts</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {deviceBooks.length === 0 && (
+        <div className="rounded-xl border border-dashed border-line-strong bg-paper-card p-6 text-center mb-5">
+          <p className="font-medium">No books with contexts yet</p>
+          <p className="text-sm text-ink-faint mt-1">Take notes in KOReader, or start one from a device book above.</p>
+        </div>
+      )}
 
       {sections.map((series) => {
         const list = (groups.get(series) || []).slice().sort(byOrder);
@@ -164,6 +216,52 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
           </div>
         );
       })}
+
+      {/* standalone imported context files (web-only, e.g. shared by other users) */}
+      <div className="mt-8 pt-5 border-t border-line">
+        <div className="flex items-baseline gap-2 mb-2 flex-wrap">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-faint">Imported</h2>
+          <span className="text-xs text-ink-faint">standalone context files, viewed only on the web</span>
+          <span className="flex-1" />
+          <label className={`${btn} cursor-pointer`}>
+            Import JSON
+            <input type="file" accept=".json,application/json" className="hidden"
+                   onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void importExternal(f); }} />
+          </label>
+        </div>
+        {externalBooks.length === 0 ? (
+          <p className="text-sm text-ink-faint">Import a contexts file someone shared to browse it here. You can attach it to one of your books later.</p>
+        ) : (
+          <div className="flex flex-wrap items-start gap-2.5">
+            {externalBooks.map((b) => (
+              <div key={b.book_id} className="w-64 rounded-xl border border-line bg-paper-card p-4 shadow-card">
+                <button className="group block w-full text-left" onClick={() => onOpen(b.book_id)}>
+                  <strong className="block truncate group-hover:text-accent-hover transition">{b.title || "Imported contexts"}</strong>
+                  {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
+                </button>
+                <div className="mt-2 pt-2 border-t border-line">
+                  {attachFor === b.book_id ? (
+                    <div className="flex gap-1.5 items-center">
+                      <select autoFocus className={`${input} flex-1 py-1 min-w-0`} defaultValue=""
+                              onChange={(e) => { if (e.target.value) void attach(b.book_id, e.target.value); }}>
+                        <option value="" disabled>attach to…</option>
+                        {deviceBooks.map((d) => <option key={d.book_id} value={d.book_id}>{d.title || d.book_id}</option>)}
+                      </select>
+                      <button className={`${btn} py-1`} onClick={() => setAttachFor(null)}>Cancel</button>
+                    </div>
+                  ) : (
+                    <button className="text-xs text-ink-soft hover:text-accent-hover transition disabled:opacity-50"
+                            disabled={deviceBooks.length === 0} title={deviceBooks.length === 0 ? "no books to attach to yet" : undefined}
+                            onClick={() => setAttachFor(b.book_id)}>
+                      + Attach to one of your books
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

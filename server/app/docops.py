@@ -34,8 +34,32 @@ def normalize_word(word):
     return word
 
 
-def ensure_context(doc, title, type_=None):
-    #create (or touch) a context for `title`, returns its key, or None if the title is empty
+def _chapter_for(doc, progress):
+    #the TOC title whose chapter band contains `progress` (the last chapter starting at or before it)
+    toc = (doc.get("book") or {}).get("toc") or []
+    best = None
+    for c in toc:
+        cp = c.get("progress")
+        if isinstance(cp, (int, float)) and not isinstance(cp, bool) and cp <= (progress or 0) + 1e-9:
+            if best is None or cp >= best[0]:
+                best = (cp, c.get("title"))
+    return best[1] if best else None
+
+
+def _anchor(doc, progress):
+    #the {progress, chapter} a web add carries when the timeline is scrubbed to `progress`
+    a = {}
+    if isinstance(progress, (int, float)) and not isinstance(progress, bool):
+        a["progress"] = progress
+        ch = _chapter_for(doc, progress)
+        if ch:
+            a["chapter"] = ch
+    return a
+
+
+def ensure_context(doc, title, type_=None, progress=None):
+    #create (or touch) a context for `title`, returns its key, or None if the title is empty.
+    #a brand-new context anchors to the timeline spot it was added at (progress + chapter).
     _normalize(doc)
     key = normalize_word(title)
     if not key:
@@ -52,20 +76,22 @@ def ensure_context(doc, title, type_=None):
             "type": type_ or "unset",
             "points": [],
             "updated": ts,
+            **_anchor(doc, progress),
         }
     doc["tombstones"]["contexts"].pop(key, None)  #re-create overrides any old deletion
     doc["updated"] = ts
     return key
 
 
-def add_point(doc, key, text):
-    #append a dot point to an existing context, returns True if it landed
+def add_point(doc, key, text, progress=None):
+    #append a dot point to an existing context, anchored to the timeline spot it was added at.
+    #returns True if it landed
     _normalize(doc)
     ctx = doc["contexts"].get(key)
     if not ctx or not text:
         return False
     ts = now()
-    ctx.setdefault("points", []).append({"id": gen_id(), "text": text})
+    ctx.setdefault("points", []).append({"id": gen_id(), "text": text, **_anchor(doc, progress)})
     ctx["updated"] = ts
     doc["tombstones"]["contexts"].pop(key, None)
     doc["updated"] = ts

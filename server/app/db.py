@@ -22,6 +22,8 @@ def _migrate():
             conn.exec_driver_sql("ALTER TABLE book ADD COLUMN series VARCHAR DEFAULT ''")
         if "series_index" not in cols:
             conn.exec_driver_sql("ALTER TABLE book ADD COLUMN series_index INTEGER DEFAULT 0")
+        if "source" not in cols:
+            conn.exec_driver_sql("ALTER TABLE book ADD COLUMN source VARCHAR DEFAULT 'device'")
         conn.commit()
 
 def get_session():
