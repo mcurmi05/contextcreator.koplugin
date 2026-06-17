@@ -14,12 +14,14 @@ export interface GraphPrefs {
   showHoverFocus: boolean;     //show the hover-to-focus toggle button on the graph
   showControls: boolean;       //show the zoom/fit/grid/fullscreen controls cluster
   showLegend: boolean;         //show the type filter / legend panel
+  showSearch: boolean;         //show the search box for finding contexts / dot points
   cardMode: CardMode;          //node info card: next to the node, or a fixed pinned spot
   cardSide: CardSide;          //which side of the node (anchored mode)
   cardPos: XY;                 //pinned spot as a fraction of the container (fixed mode)
   hoverBtnPos: XY | null;      //custom spot for the hover-focus button (null = top-right corner)
   controlsPos: XY | null;      //custom spot for the zoom/fit/grid controls (null = bottom-right corner)
   legendPos: XY | null;        //custom spot for the type filter / legend (null = top-left corner)
+  searchPos: XY | null;        //custom spot for the search box (null = top-centre)
 }
 
 export interface Theme {
@@ -31,8 +33,8 @@ export interface Theme {
 }
 
 export const DEFAULT_GRAPH: GraphPrefs = {
-  hoverFocusOn: true, showHoverFocus: true, showControls: true, showLegend: true, cardMode: "anchored", cardSide: "right",
-  cardPos: { x: 0.05, y: 0.08 }, hoverBtnPos: null, controlsPos: null, legendPos: null,
+  hoverFocusOn: true, showHoverFocus: true, showControls: true, showLegend: true, showSearch: true, cardMode: "anchored", cardSide: "right",
+  cardPos: { x: 0.05, y: 0.08 }, hoverBtnPos: null, controlsPos: null, legendPos: null, searchPos: null,
 };
 
 export const DEFAULT_THEME: Theme = {

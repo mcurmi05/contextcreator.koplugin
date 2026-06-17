@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import cytoscape, { type Core } from "cytoscape";
 import cola from "cytoscape-cola";
-import { colorFor, contextProgress, typeLabel, TYPE_LABELS } from "./model";
+import { colorFor, contextProgress, pointText, typeLabel, TYPE_LABELS } from "./model";
 import { btnGhost } from "./ui";
-import { IconImg } from "./icons";
+import { IconImg, NetworkIcon } from "./icons";
 import { NodeCard, RelCard } from "./GraphCard";
 import type { GraphPrefs, XY } from "./theme";
 import type { Doc, GraphEditOps, PointRef, Selected } from "./types";
@@ -37,8 +37,8 @@ const FADE_MS = 150;
 //per-book graph. contexts are springy nodes (coloured by type, sized by note count), relationships
 //are edges. hovering spotlights a neighbourhood, selecting pops a note card anchored to the node
 //(rather than just outlining the circle), and the scrub fades in nodes as the story reaches them.
-export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onToggleType, typeColors, onSetTypeColor, onAddPoint, onEditPoint, onMoveNodes, graph, onGraphChange, ops }: {
-  doc: Doc; scrub: number; selected: Selected;
+export default function Graph({ doc, scrub, onScrub, selected, onSelect, hiddenTypes, onToggleType, typeColors, onSetTypeColor, onAddPoint, onEditPoint, onMoveNodes, graph, onGraphChange, ops }: {
+  doc: Doc; scrub: number; onScrub: (v: number) => void; selected: Selected;
   onSelect: (s: Selected) => void;
   hiddenTypes: Set<string>; onToggleType: (t: string) => void;
   typeColors: Record<string, string>; onSetTypeColor: (t: string, color: string | null) => void;
@@ -69,17 +69,19 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
   const hoverBtnRef = useRef<HTMLButtonElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const legendRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
   const clickGuardRef = useRef(false);                   //set right after a drag so the trailing click is ignored
   const graphRef = useRef(graph);                        //latest prefs, read inside the rAF card-placement loop
   useEffect(() => { onMoveRef.current = onMoveNodes; }, [onMoveNodes]);
   useEffect(() => { graphRef.current = graph; }, [graph]);
 
   const [legendOpen, setLegendOpen] = useState(true);
+  const [query, setQuery] = useState("");                //search-box text for finding contexts / dot points
   const [isFs, setIsFs] = useState(false);               //graph filling the whole screen (fullscreen api)
   const [legendBottom, setLegendBottom] = useState<number | null>(null); //px below container top where the legend ends
   //which overlay is being dragged + its live fractional position, so it moves under the cursor before
   //we commit the final spot to the (persisted, exportable) config on drop
-  type Which = "hover" | "controls" | "card" | "legend";
+  type Which = "hover" | "controls" | "card" | "legend" | "search";
   const [dragging, setDragging] = useState<{ which: Which; p: XY } | null>(null);
 
   //drag an overlay (hover button / controls / card / legend) to a new spot in the container. distinguishes
@@ -98,7 +100,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     //the other draggable overlays this one mustn't be dropped on top of. captured up front (they don't
     //move during the drag), as rects relative to the container. no gap, they can sit flush together.
     const GAP = 0;
-    const obstacles = ([hoverBtnRef.current, controlsRef.current, legendRef.current]
+    const obstacles = ([hoverBtnRef.current, controlsRef.current, legendRef.current, searchRef.current]
       .filter((o) => o && o !== el) as HTMLElement[])
       .map((o) => { const r = o.getBoundingClientRect(); return { x: r.left - boxRect.left, y: r.top - boxRect.top, w: r.width, h: r.height }; });
     const hits = (l: number, t: number) =>
@@ -134,6 +136,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
       if (which === "hover") onGraphChange({ ...g, hoverBtnPos: last });
       else if (which === "controls") onGraphChange({ ...g, controlsPos: last });
       else if (which === "legend") onGraphChange({ ...g, legendPos: last });
+      else if (which === "search") onGraphChange({ ...g, searchPos: last });
       else onGraphChange({ ...g, cardPos: last });
     };
     window.addEventListener("pointermove", onMove);
@@ -464,6 +467,51 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
     setTimeout(() => { cy.animate({ fit: { eles, padding: 60 }, duration: 320 }); savePositions(true); }, 440);
   }
 
+  //relationship-aware layout (different to the grid): run a force-directed sim (cola) over just the
+  //visible nodes/edges. force-directed naturally drags the most-connected nodes toward the centre and
+  //pushes loosely linked ones outward. edge length scales with the label so the full relationship text
+  //has room to sit on the line, and handleDisconnected tucks free nodes neatly off to the side.
+  function arrangeByRelationships() {
+    const cy = cyRef.current; if (!cy) return;
+    layoutRef.current?.stop();
+    const visN = cy.nodes().filter((n) => n.style("display") !== "none");
+    const nodes = visN.nonempty() ? visN : cy.nodes();
+    const edges = cy.edges().filter((e) => e.style("display") !== "none" &&
+      e.source().style("display") !== "none" && e.target().style("display") !== "none");
+    const eles = nodes.union(edges);
+    const layout = eles.layout({
+      name: "cola", infinite: false, fit: false, animate: true, maxSimulationTime: 4500,
+      randomize: true, avoidOverlap: true, handleDisconnected: true,
+      //pad each node by roughly half its own label width, so a long name doesn't sit on top of a neighbour
+      nodeSpacing: (node: cytoscape.NodeSingular) => 26 + String(node.data("label") || "").length * 3,
+      //longer labels need a longer edge so the text isn't covered by the two nodes it joins
+      edgeLength: (edge: cytoscape.EdgeSingular) => 170 + String(edge.data("label") || "").length * 9,
+      //give cola plenty of iterations to actually resolve the overlap constraints before it stops
+      unconstrIter: 15, userConstIter: 20, allConstIter: 40,
+    } as unknown as cytoscape.LayoutOptions);
+    layoutRef.current = layout as unknown as { stop: () => void };
+    layout.one("layoutstop", () => {
+      cy.animate({ fit: { eles, padding: 60 }, duration: 320 });
+      savePositions(true);
+    });
+    layout.run();
+  }
+
+  //jump the camera to a context node and select it. if it sits ahead of the timeline scrub, or its type
+  //is filtered out, reveal it first so it's actually on screen, then centre on it once that settles.
+  function focusNode(key: string) {
+    const cy = cyRef.current; if (!cy) return;
+    const node = cy.getElementById(key);
+    if (node.empty()) return;
+    const cp = node.data("cp") as number | null;
+    if (cp != null && cp > scrubRef.current) onScrub(cp);
+    const type = (node.data("type") as string) || "unset";
+    if (hiddenRef.current.has(type)) onToggleType(type);
+    onSelect({ kind: "context", id: key });
+    //let the reveal/repaint land, then ease over to it (zoom in a touch if we're way out)
+    setTimeout(() => { cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1), duration: 350 }); }, 80);
+  }
+
   //legend / filter data: which types are actually present, with counts
   const contexts = doc.contexts || {};
   const counts: Record<string, number> = {};
@@ -497,9 +545,74 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
 
   const card = renderCard();
 
+  //search hits: contexts whose title matches, then dot points whose text matches (each carries its parent
+  //context so picking it jumps to that node). titles first, capped so the dropdown stays manageable.
+  const q = query.trim().toLowerCase();
+  type Hit = { key: string; title: string; kind: "context" | "point"; snippet?: string };
+  const hits: Hit[] = [];
+  if (q) {
+    for (const k in contexts) {
+      const title = contexts[k].title || k;
+      if (title.toLowerCase().includes(q)) hits.push({ key: k, title, kind: "context" });
+    }
+    for (const k in contexts) {
+      for (const p of contexts[k].points || []) {
+        const text = pointText(p);
+        if (text && text.toLowerCase().includes(q)) hits.push({ key: k, title: contexts[k].title || k, kind: "point", snippet: text });
+      }
+    }
+  }
+  const shownHits = hits.slice(0, 24);
+  const pickHit = (h: Hit) => { focusNode(h.key); setQuery(""); };
+
   return (
     <div ref={containerRef} className="relative w-full h-full rounded-xl border border-line overflow-hidden">
       <div ref={canvasRef} className="absolute inset-0 graph-canvas" />
+
+      {/* search box: find a context by title or a dot point by its text, click a hit to jump to its node.
+          hideable from settings, draggable by its grip (defaults to the top centre). */}
+      {graph.showSearch && (
+        <div ref={searchRef}
+             style={pctStyle(posFor("search", graph.searchPos))}
+             className={`absolute z-30 w-[268px] ${posFor("search", graph.searchPos) ? "" : "top-3 left-1/2 -translate-x-1/2"}`}>
+          <div className="flex items-center gap-1.5 rounded-xl border border-line bg-paper-card/95 backdrop-blur shadow-card px-2 py-1.5">
+            <span onPointerDown={(e) => startDrag(e, searchRef.current, "search")}
+                  className="shrink-0 cursor-grab active:cursor-grabbing select-none touch-none" title="Drag to move">
+              <IconImg src="/drag.png" className="w-3 h-3 opacity-60" />
+            </span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                 className="shrink-0 text-ink-faint" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" strokeLinecap="round" />
+            </svg>
+            <input value={query} onChange={(e) => setQuery(e.target.value)}
+                   onKeyDown={(e) => { if (e.key === "Enter" && shownHits[0]) pickHit(shownHits[0]); if (e.key === "Escape") setQuery(""); }}
+                   placeholder="Search contexts or notes…"
+                   className="flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-ink-faint" />
+            {query && (
+              <button onClick={() => setQuery("")} title="Clear"
+                      className="shrink-0 text-ink-faint hover:text-ink transition text-sm leading-none px-0.5">×</button>
+            )}
+          </div>
+          {q && (
+            <div className="mt-1 max-h-72 overflow-auto rounded-xl border border-line bg-paper-card/95 backdrop-blur shadow-card py-1">
+              {shownHits.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-ink-faint">No matches</div>
+              ) : shownHits.map((h, i) => (
+                <button key={`${h.kind}-${h.key}-${i}`} onClick={() => pickHit(h)}
+                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-paper-sunk transition">
+                  <span className="w-2 h-2 rounded-full shrink-0 ring-1 ring-black/10"
+                        style={{ background: colorFor(contexts[h.key]?.type, typeColors) }} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm truncate">{h.title}</span>
+                    {h.kind === "point" && <span className="block text-xs text-ink-faint truncate">{h.snippet}</span>}
+                  </span>
+                  <span className="shrink-0 text-[10px] uppercase tracking-wide text-ink-faint">{h.kind === "point" ? "note" : "context"}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* legend doubles as a type filter (click a row) + colour picker (click the swatch). collapsible,
           hideable from settings, and draggable (panel by its header, pill as a whole). */}
@@ -587,6 +700,7 @@ export default function Graph({ doc, scrub, selected, onSelect, hiddenTypes, onT
                   onClick={() => cyRef.current?.animate({ zoom: (cyRef.current.zoom() || 1) / 1.25, duration: 150 })}><IconImg src="/minus.png" /></button>
           <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Fit to view"
                   onClick={() => { const cy = cyRef.current; if (cy) cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 300 }); }}><IconImg src="/expand.png" /></button>
+          <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Arrange by relationships (spread out so links read clearly)" onClick={arrangeByRelationships}><NetworkIcon /></button>
           <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5 border-b border-line`} title="Reset layout (space nodes evenly)" onClick={resetLayout}><IconImg src="/grid.png" /></button>
           <button className={`${btnGhost} justify-center w-full rounded-none px-2.5 py-1.5`} title={isFs ? "Exit fullscreen" : "Fullscreen graph"}
                   aria-label={isFs ? "Exit fullscreen" : "Fullscreen graph"} onClick={toggleFullscreen}><IconImg src="/fullscreen.png" /></button>

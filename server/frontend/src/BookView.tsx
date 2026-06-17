@@ -213,7 +213,7 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
       {/* main work area fills the rest of the viewport */}
       <div className="flex-1 min-h-0">
         {tab === "graph" ? (
-          <Graph doc={doc} scrub={scrub} selected={selected} onSelect={setSelected}
+          <Graph doc={doc} scrub={scrub} onScrub={setScrub} selected={selected} onSelect={setSelected}
                  hiddenTypes={hiddenTypes} onToggleType={toggleType} typeColors={typeColors} onSetTypeColor={setTypeColor}
                  onAddPoint={addPoint} onEditPoint={editPoint} onMoveNodes={commitPositions}
                  graph={graph} onGraphChange={onGraphChange} ops={ops} />

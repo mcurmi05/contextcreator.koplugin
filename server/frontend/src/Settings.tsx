@@ -177,6 +177,7 @@ function GraphSettings({ theme, set }: { theme: Theme; set: (p: Partial<Theme>) 
         </div>
         <Check on={g.showControls} onChange={(v) => setG({ showControls: v })} label="Show the zoom / fit / grid / fullscreen controls" />
         <Check on={g.showLegend} onChange={(v) => setG({ showLegend: v })} label="Show the type filter / legend" />
+        <Check on={g.showSearch} onChange={(v) => setG({ showSearch: v })} label="Show the search box (find contexts / notes)" />
       </div>
       <p className="text-xs text-ink-faint -mt-1.5">
         "Hover focus on" dims everything not connected to the node you hover, toggle it here even if you hide its
