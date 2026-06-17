@@ -64,6 +64,7 @@ What you can do:
 - **Relationships**: link two contexts ("married to", "kills", "lives in"), pick a direction, and attach dot points to the link itself.
 - **Rename/retype/delete**: contexts and links, all from long press menus.
 - **No spoilers by default**: contexts and dot points from beyond your current reading position are hidden, so the notes never get ahead of you. There's a toggle at the top of the contexts list to show everything, and your choice is saved. This will mean you can import notes from someone else and read them as you go along.
+- **Profiles**: a book can hold more than one set of notes (a "Main" one, a spoiler free reread, a characters only pass, whatever). Pick which one you're reading and writing under in **Context Creator → Profile**, or make a new one there. The device remembers its own choice per book, separate from the web, and switching pulls that profile's notes down.
 
 Notes live in one JSON file per book under a `contextcreator` folder, in a versioned schema (typed nodes, relationships, a stable book id from KOReader's `partial_md5_checksum`, per entity timestamps, and tombstones) so device and web edits merge without clobbering each other.
 
@@ -94,6 +95,9 @@ Enabling a per book graph of your contexts and the links between them, nodes col
 
 - **Edit everything from the graph**: click a node or link to rename, retype, add/edit/delete dot points, create/edit/delete links, change direction. Every change syncs back to KOReader through the same merge.
 - **Timeline scrubber**: scrub through the book's narrative, contexts fade in as the story reaches them, with chapter bands. A **Jump to current** button snaps the timeline to where you're actually up to in KOReader, and **Show all** reveals everything.
+- **Profiles**: the same book can have several named context documents, switch between them from the profile dropdown in the book header, or create one (blank or a copy of the current notes), rename and delete them. The web remembers its own selection per book, independent of what the device is reading, and reading position plus the chapter timeline stay shared across all of a book's profiles.
+- **Search**: find any context by name or any dot point by its text from the search box on the graph, clicking a hit jumps the camera to that node and reveals it if it's ahead of the timeline.
+- **Arrange by relationships**: a layout button that spreads nodes out by how they're linked (most connected toward the middle, free nodes tucked aside) so the relationship labels are readable, separate from the grid tidy up.
 - **Hover focus**: hovering a node dims everything not connected to it (toggleable, hideable).
 - **Legend/filter**: filter by type and recolour each type, collapsible.
 - **Fully arrangeable**: drag the filter, the hover focus button, the zoom/fit/reset/fullscreen controls, and the info card anywhere, show or hide each of them, choose whether the info card sits next to its node or in a fixed spot, and go fullscreen. There's a true fullscreen button that fills the whole screen with the graph.

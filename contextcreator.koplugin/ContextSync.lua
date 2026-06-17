@@ -114,7 +114,9 @@ function ContextSync:syncNow(interactive)
     local doc = self.store:load()
     local progress = self.store:describeLocator(nil).progress
     if progress then doc.reading_progress = progress end
-    local ok, merged = client:pushBook(book_id, doc)
+    --push the active profile, passing its name so a freshly created one registers server-side
+    local profile = self.store:getProfileId()
+    local ok, merged = client:pushBook(book_id, doc, profile, self.store:getProfileName(profile))
     if ok and type(merged) == "table" and merged.contexts then
         self.store:replace(merged) -- adopt the merged result without re-triggering a sync
         if interactive then
@@ -164,6 +166,33 @@ function ContextSync:syncLibrary()
     if #books == 0 then return end
     local s = self:settings()
     ContextSyncClient:new(s.server, s.username, s.password):pushLibrary(books)
+end
+
+--pull the book's profile list from the server and fold it into the local list, so profiles created on
+--the web (or another device) show up in the picker here. server names win, local-only profiles not yet
+--pushed are kept. best-effort like the rest of sync.
+function ContextSync:syncProfiles()
+    if not self:isConfigured() then return end
+    if NetworkMgr and NetworkMgr.isConnected and not NetworkMgr:isConnected() then return end
+    local book_id = self.store:getBookId()
+    if not book_id then return end
+    local s = self:settings()
+    local ok, list = ContextSyncClient:new(s.server, s.username, s.password):listProfiles(book_id)
+    if not ok or type(list) ~= "table" then return end
+    local by_id, order = {}, {}
+    for _, p in ipairs(self.store:getProfileList()) do
+        if not by_id[p.id] then by_id[p.id] = { id = p.id, name = p.name }; order[#order + 1] = p.id end
+    end
+    for _, p in ipairs(list) do
+        local id = p.profile_id
+        if id then
+            if by_id[id] then by_id[id].name = p.name or by_id[id].name
+            else by_id[id] = { id = id, name = p.name or id }; order[#order + 1] = id end
+        end
+    end
+    local merged = {}
+    for _, id in ipairs(order) do merged[#merged + 1] = by_id[id] end
+    if #merged > 0 then self.store:setProfileList(merged) end
 end
 
 --a single text setting (server url / token), edited through an input dialog

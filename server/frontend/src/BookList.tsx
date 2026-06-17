@@ -1,8 +1,17 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { readJsonFile } from "./files";
+import { loadProfile, saveProfile } from "./profilePref";
 import { btn, btnAccent, input } from "./ui";
 import type { BookSummary, LibraryEntry } from "./types";
+
+//the profile a card will open at: the remembered choice if it still exists, else the first profile
+function chosenProfile(b: BookSummary, override?: string): string {
+  const list = b.profiles || [];
+  const want = override ?? loadProfile(b.book_id);
+  if (list.some((p) => p.profile_id === want)) return want;
+  return list[0]?.profile_id || "default";
+}
 
 const byOrder = (a: BookSummary, b: BookSummary) =>
   (a.series_index ?? 0) - (b.series_index ?? 0) || (a.title || "").localeCompare(b.title || "");
@@ -20,6 +29,18 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
   const [error, setError] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [hint, setHint] = useState<{ series: string; before: string | null } | null>(null);
+  const [picked, setPicked] = useState<Record<string, string>>({}); //book_id -> profile_id to open at
+
+  //open a book at the chosen profile (remembering it so BookView lands there)
+  function open(b: BookSummary) {
+    const pid = chosenProfile(b, picked[b.book_id]);
+    saveProfile(b.book_id, pid);
+    onOpen(b.book_id);
+  }
+  function pickProfile(bookId: string, pid: string) {
+    setPicked((m) => ({ ...m, [bookId]: pid }));
+    saveProfile(bookId, pid);
+  }
 
   const load = async () => {
     try { setBooks(await api<BookSummary[]>("/api/books")); } catch { setBooks([]); }
@@ -93,12 +114,27 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
     catch (e) { setError("Import failed: " + (e as Error).message); }
   }
 
-  //merge an imported doc into one of your real books, then it's gone from Imported
-  async function attach(externalId: string, targetId: string) {
+  //attach one profile of an imported doc to a real book as a NEW named profile, then it's gone from Imported
+  async function attach(externalId: string, targetId: string, fromProfile: string, name: string) {
     setError("");
-    try { await api(`/api/books/${encodeURIComponent(targetId)}/attach/${encodeURIComponent(externalId)}`, { method: "POST" }); setAttachFor(null); await load(); }
-    catch (e) { setError((e as Error).message); }
+    try {
+      const r = await api<{ profile_id: string }>(
+        `/api/books/${encodeURIComponent(targetId)}/attach/${encodeURIComponent(externalId)}` +
+        `?from_profile=${encodeURIComponent(fromProfile)}&name=${encodeURIComponent(name)}`, { method: "POST" });
+      saveProfile(targetId, r.profile_id); //so opening that book lands on the freshly attached profile
+      setAttachFor(null); await load();
+    } catch (e) { setError((e as Error).message); }
   }
+
+  //a per-book profile chooser, shown when a book has more than one. picking it sets where the card opens
+  //(and, for an Imported entry, which profile gets attached).
+  const profileDropdown = (b: BookSummary) => (
+    <select className={`${input} w-full py-1 text-sm`} value={chosenProfile(b, picked[b.book_id])}
+            onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}
+            onChange={(e) => pickProfile(b.book_id, e.target.value)}>
+      {(b.profiles || []).map((p) => <option key={p.profile_id} value={p.profile_id}>{p.name}</option>)}
+    </select>
+  );
 
   if (!books) return <p className="text-ink-faint">Loading…</p>;
 
@@ -182,10 +218,16 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
                        className={`relative w-64 rounded-xl border bg-paper-card p-4 shadow-card transition cursor-grab active:cursor-grabbing hover:shadow-pop hover:border-accent-ring ${
                          dragId === b.book_id ? "opacity-40" : ""} ${dropBefore ? "border-accent" : "border-line"}`}>
                     {dropBefore && <span className="absolute -left-1.5 top-2 bottom-2 w-1 rounded-full bg-accent" />}
-                    <button className="group block w-full text-left" onClick={() => onOpen(b.book_id)}>
+                    <button className="group block w-full text-left" onClick={() => open(b)}>
                       <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
                       {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
                     </button>
+                    {(b.profiles?.length ?? 0) >= 1 && (
+                      <label className="mt-2 block">
+                        <span className="block text-[10px] uppercase tracking-wide text-ink-faint mb-0.5">Profile</span>
+                        {profileDropdown(b)}
+                      </label>
+                    )}
                     <div className="mt-2 pt-2 border-t border-line">
                       {editing === b.book_id ? (
                         <form onSubmit={(e) => { e.preventDefault(); void saveSeries(b.book_id); }}>
@@ -235,15 +277,28 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
           <div className="flex flex-wrap items-start gap-2.5">
             {externalBooks.map((b) => (
               <div key={b.book_id} className="w-64 rounded-xl border border-line bg-paper-card p-4 shadow-card">
-                <button className="group block w-full text-left" onClick={() => onOpen(b.book_id)}>
+                <button className="group block w-full text-left" onClick={() => open(b)}>
                   <strong className="block truncate group-hover:text-accent-hover transition">{b.title || "Imported contexts"}</strong>
                   {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
                 </button>
+                {(b.profiles?.length ?? 0) >= 1 && (
+                  <label className="mt-2 block">
+                    <span className="block text-[10px] uppercase tracking-wide text-ink-faint mb-0.5">Profile</span>
+                    {profileDropdown(b)}
+                  </label>
+                )}
                 <div className="mt-2 pt-2 border-t border-line">
                   {attachFor === b.book_id ? (
                     <div className="flex gap-1.5 items-center">
                       <select autoFocus className={`${input} flex-1 py-1 min-w-0`} defaultValue=""
-                              onChange={(e) => { if (e.target.value) void attach(b.book_id, e.target.value); }}>
+                              onChange={(e) => {
+                                const targetId = e.target.value;
+                                if (!targetId) return;
+                                const def = b.title || "Imported";
+                                const nm = window.prompt("Name the new profile this becomes on that book:", def);
+                                if (nm && nm.trim()) void attach(b.book_id, targetId, chosenProfile(b, picked[b.book_id]), nm.trim());
+                                else setAttachFor(null);
+                              }}>
                         <option value="" disabled>attach to…</option>
                         {deviceBooks.map((d) => <option key={d.book_id} value={d.book_id}>{d.title || d.book_id}</option>)}
                       </select>

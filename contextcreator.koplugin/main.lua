@@ -11,6 +11,7 @@ local Dispatcher = require("dispatcher")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
+local T = require("ffi/util").template
 local ContextStore = require("ContextStore")
 local ContextView = require("ContextView")
 local ContextSync = require("ContextSync")
@@ -53,6 +54,8 @@ function ContextCreator:init()
         --pull server changes shortly after the book opens (don't block the open), then keep polling
         --periodically so web/other-device edits show up without a manual sync
         UIManager:scheduleIn(1, function() self.sync:syncNow() end)
+        --learn this book's profiles (incl. any made on the web) so the picker is current
+        UIManager:scheduleIn(2, function() self.sync:syncProfiles() end)
         --report the device's book catalog so the web ui can start contexts for un-noted books
         UIManager:scheduleIn(3, function() self.sync:syncLibrary() end)
         self.sync:startPeriodic()
@@ -96,11 +99,72 @@ function ContextCreator:addToMainMenu(menu_items)
                 callback = function() self.view:showAllContexts() end,
             },
             {
+                text_func = function()
+                    return T(_("Profile: %1"), self.store:getProfileName(self.store:getProfileId()))
+                end,
+                sub_item_table_func = function() return self:profilesMenu() end,
+            },
+            {
                 text = _("Sync"),
                 sub_item_table_func = function() return self.sync:menu() end,
             },
         },
     }
+end
+
+--the "Profile" submenu: pick which of the book's context docs to read/write here (independent of the
+--web's choice), or make a new one. switching reloads the view and syncs so its contents come down.
+function ContextCreator:profilesMenu()
+    local items = {}
+    for _, p in ipairs(self.store:getProfileList()) do
+        local id = p.id
+        items[#items + 1] = {
+            text = p.name,
+            checked_func = function() return self.store:getProfileId() == id end,
+            callback = function(touchmenu)
+                self.store:setProfileId(id)
+                if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
+                if self.sync then self.sync:syncNow() end --pull this profile's contents down
+                self.view:showAllContexts()
+            end,
+        }
+    end
+    items[#items + 1] = {
+        text = _("New profile\u{2026}"),
+        keep_menu_open = true,
+        separator = true,
+        callback = function(touchmenu) self:promptNewProfile(touchmenu) end,
+    }
+    return items
+end
+
+--prompt for a new profile name, create it locally (made active) and sync so the server registers it
+function ContextCreator:promptNewProfile(touchmenu)
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    dialog = InputDialog:new{
+        title = _("New profile"),
+        input_hint = _("profile name"),
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            {
+                text = _("Create"),
+                is_enter_default = true,
+                callback = function()
+                    local name = dialog:getInputText()
+                    UIManager:close(dialog)
+                    if name and name ~= "" then
+                        self.store:addProfile(name)
+                        if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
+                        if self.sync then self.sync:syncNow() end
+                        self.view:showAllContexts()
+                    end
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
 end
 
 --dispatched by the registered contextcreator_show action

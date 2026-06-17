@@ -69,14 +69,30 @@ function ContextSyncClient:request(method, path, body)
     return true, decoded
 end
 
---push the device's whole doc; server merges and returns the merged doc to adopt locally
-function ContextSyncClient:pushBook(book_id, doc)
-    return self:request("POST", "/api/sync/books/" .. book_id, doc)
+--url-encode a profile name for the query string (spaces, punctuation etc)
+local function urlencode(s)
+    return (tostring(s or ""):gsub("[^%w%-_%.~]", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end))
 end
 
---pull the server's authoritative doc for a book (not used by the seamless flow, handy for debugging)
-function ContextSyncClient:pullBook(book_id)
-    return self:request("GET", "/api/sync/books/" .. book_id)
+--push the device's whole doc for one profile; server merges and returns the merged doc to adopt locally.
+--name (optional) registers/updates the profile's display name server-side (used when it's brand new).
+function ContextSyncClient:pushBook(book_id, doc, profile, name)
+    local q = "?profile=" .. urlencode(profile or "default")
+    if name and name ~= "" then q = q .. "&name=" .. urlencode(name) end
+    return self:request("POST", "/api/sync/books/" .. book_id .. q, doc)
+end
+
+--pull the server's authoritative doc for one profile (not used by the seamless flow, handy for debugging)
+function ContextSyncClient:pullBook(book_id, profile)
+    return self:request("GET", "/api/sync/books/" .. book_id .. "?profile=" .. urlencode(profile or "default"))
+end
+
+--the named profiles the server knows for a book, so the device picker can show them (and learn ones
+--made on the web). returns a list of { profile_id, name, updated }.
+function ContextSyncClient:listProfiles(book_id)
+    return self:request("GET", "/api/sync/books/" .. book_id .. "/profiles")
 end
 
 --report the device's book catalog (a list of { book_id, title, authors }) so the web ui can offer to

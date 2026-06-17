@@ -42,7 +42,11 @@ export interface Doc {
   layout?: Record<string, NodePos>;   //web-set node positions, keyed by context key
   reading_progress?: number | null;   //0..1 fraction the device last read up to
   tombstones?: { contexts: Record<string, number>; relationships: Record<string, number>; points: Record<string, number> };
+  profile?: { id: string; name: string };  //which named profile this doc is (server-advertised)
 }
+
+//a named context document within a book (alternate note-set)
+export interface ProfileSummary { profile_id: string; name: string; updated?: number; }
 
 //locate a dot point for editing/deletion: by stable id when it has one, else by list index
 export interface PointRef { id?: string; index: number }
@@ -62,7 +66,7 @@ export interface GraphEditOps {
   deleteRelPoint: (id: string, ref: PointRef) => void;
 }
 
-export interface BookSummary { book_id: string; title?: string; authors?: string; series?: string; series_index?: number; source?: string; updated?: number; }
+export interface BookSummary { book_id: string; title?: string; authors?: string; series?: string; series_index?: number; source?: string; updated?: number; profiles?: ProfileSummary[]; }
 //a book on the device (from its read history) that has no contexts doc yet
 export interface LibraryEntry { book_id: string; title?: string; authors?: string; }
 export interface User { id: number; username: string; is_admin?: boolean; }

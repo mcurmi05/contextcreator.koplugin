@@ -142,6 +142,26 @@ export function deleteContext(doc: Doc, key: string) {
   doc.updated = now();
 }
 
+//empty a whole profile: tombstone every context, relationship and point so the cleared state survives
+//the additive sync (the device's copy is dropped on its next sync rather than resurrecting everything),
+//then drop the live collections + layout. mirrors how deleteContext/deleteLink tombstone, just for all.
+export function clearAll(doc: Doc) {
+  const t = tombs(doc);
+  const ts = now();
+  for (const key in doc.contexts) {
+    for (const p of doc.contexts[key].points || []) tombstonePoint(doc, p);
+    t.contexts[key] = ts;
+  }
+  for (const rel of doc.relationships || []) {
+    for (const p of rel.points || []) tombstonePoint(doc, p);
+    t.relationships[rel.id] = ts;
+  }
+  doc.contexts = {};
+  doc.relationships = [];
+  doc.layout = {};
+  doc.updated = ts;
+}
+
 export function setType(doc: Doc, key: string, type: string) {
   const ctx = doc.contexts[key];
   if (!ctx) return;

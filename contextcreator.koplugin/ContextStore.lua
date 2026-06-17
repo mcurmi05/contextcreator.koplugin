@@ -45,8 +45,78 @@ function ContextStore:getBookTitle()
     return title or "Untitled"
 end
 
+--the file for the currently active profile. the "default" profile keeps the plain <title>.json name
+--(so books from before profiles existed just keep working), other profiles get a <title>.<id>.json file.
 function ContextStore:getBookFilePath()
-    return self:getStoreDir() .. "/" .. ContextText.sanitizeFilename(self:getBookTitle()) .. ".json"
+    local base = self:getStoreDir() .. "/" .. ContextText.sanitizeFilename(self:getBookTitle())
+    local pid = self:getProfileId()
+    if pid == "default" then return base .. ".json" end
+    return base .. "." .. pid .. ".json"
+end
+
+--profiles: a book can hold several named context docs, the user picks which to read/write on the device
+--(independent of the web's choice). the active id + known list live in G_reader_settings keyed by the
+--book's sync id (falling back to its title when the id isn't known), so the choice persists per book.
+function ContextStore:getBookKey()
+    return self:getBookId() or ContextText.sanitizeFilename(self:getBookTitle())
+end
+
+function ContextStore:profilesSetting()
+    return G_reader_settings:readSetting("contextcreator_profiles") or {}
+end
+
+function ContextStore:bookProfiles()
+    local all = self:profilesSetting()
+    return all[self:getBookKey()] or { active = "default", list = { { id = "default", name = "Main" } } }
+end
+
+function ContextStore:saveBookProfiles(bp)
+    local all = self:profilesSetting()
+    all[self:getBookKey()] = bp
+    G_reader_settings:saveSetting("contextcreator_profiles", all)
+end
+
+function ContextStore:getProfileId()
+    return self:bookProfiles().active or "default"
+end
+
+function ContextStore:setProfileId(id)
+    local bp = self:bookProfiles()
+    bp.active = id or "default"
+    self:saveBookProfiles(bp)
+end
+
+function ContextStore:getProfileList()
+    local list = self:bookProfiles().list
+    if not list or #list == 0 then return { { id = "default", name = "Main" } } end
+    return list
+end
+
+--replace the known profile list (e.g. after pulling it from the server), keeping the active selection
+function ContextStore:setProfileList(list)
+    local bp = self:bookProfiles()
+    bp.list = list
+    if not bp.active then bp.active = "default" end
+    self:saveBookProfiles(bp)
+end
+
+function ContextStore:getProfileName(id)
+    for _, p in ipairs(self:getProfileList()) do
+        if p.id == id then return p.name end
+    end
+    return id == "default" and "Main" or id
+end
+
+--create a new profile locally and make it active. returns its id. the next sync registers it (with its
+--name) on the server, which is also where it gets its initial (empty) contents.
+function ContextStore:addProfile(name)
+    local id = "k-" .. ContextSchema.genId() --device-origin profile id
+    local bp = self:bookProfiles()
+    bp.list = bp.list or { { id = "default", name = "Main" } }
+    bp.list[#bp.list + 1] = { id = id, name = name }
+    bp.active = id
+    self:saveBookProfiles(bp)
+    return id
 end
 
 --the stable per book id used for sync, koreaders partial md5 of the file (same hash kosync uses,

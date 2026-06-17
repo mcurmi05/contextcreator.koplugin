@@ -4,12 +4,14 @@ import Graph from "./Graph";
 import Browse from "./Browse";
 import Timeline from "./Timeline";
 import DetailPanel from "./DetailPanel";
+import ProfilePicker from "./ProfilePicker";
 import { btn } from "./ui";
 import { loadTypeColors, saveTypeColors } from "./typeColors";
 import { downloadJson, readJsonFile, slug } from "./files";
 import * as dq from "./docops";
+import { loadProfile, saveProfile } from "./profilePref";
 import type { GraphPrefs } from "./theme";
-import type { Doc, GraphEditOps, Selected } from "./types";
+import type { Doc, GraphEditOps, ProfileSummary, Selected } from "./types";
 
 export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   bookId: string; onBack: () => void; graph: GraphPrefs; onGraphChange: (g: GraphPrefs) => void;
@@ -22,13 +24,28 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   const [typeColors, setTypeColors] = useState<Record<string, string>>(loadTypeColors);
   const [undoStack, setUndoStack] = useState<Doc[]>([]);
   const [redoStack, setRedoStack] = useState<Doc[]>([]);
+  const [profile, setProfile] = useState<string>(() => loadProfile(bookId));
+  const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
   const lastUpdated = useRef<number | undefined>(undefined);
 
+  //every notes call is scoped to the active profile via ?profile=
+  const bookUrl = useCallback(
+    (suffix = "") => `/api/books/${encodeURIComponent(bookId)}${suffix}` +
+      `${suffix.includes("?") ? "&" : "?"}profile=${encodeURIComponent(profile)}`,
+    [bookId, profile],
+  );
+
+  const loadProfiles = useCallback(async () => {
+    try { setProfiles(await api<ProfileSummary[]>(`/api/books/${encodeURIComponent(bookId)}/profiles`)); }
+    catch { /* ignore */ }
+  }, [bookId]);
+  useEffect(() => { void loadProfiles(); }, [loadProfiles]);
+
   const reload = useCallback(async () => {
-    const d = await api<Doc>("/api/books/" + encodeURIComponent(bookId));
+    const d = await api<Doc>(bookUrl());
     lastUpdated.current = d.updated;
     setDoc(d);
-  }, [bookId]);
+  }, [bookUrl]);
 
   useEffect(() => { void reload().catch(() => {}); }, [reload]);
 
@@ -36,12 +53,12 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   useEffect(() => {
     const t = setInterval(async () => {
       try {
-        const d = await api<Doc>("/api/books/" + encodeURIComponent(bookId));
+        const d = await api<Doc>(bookUrl());
         if (d.updated !== lastUpdated.current) { lastUpdated.current = d.updated; setDoc(d); }
       } catch { /* ignore transient errors */ }
     }, 4000);
     return () => clearInterval(t);
-  }, [bookId]);
+  }, [bookUrl]);
 
   //keyboard undo/redo (ignored while typing in a field)
   useEffect(() => {
@@ -64,7 +81,7 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   }
   //web-authoritative replace (used by undo/redo + node-position saves), sets the doc exactly
   async function applyReplace(next: Doc) {
-    const saved = await api<Doc>("/api/books/" + encodeURIComponent(bookId), { method: "PUT", body: JSON.stringify(next) });
+    const saved = await api<Doc>(bookUrl(), { method: "PUT", body: JSON.stringify(next) });
     lastUpdated.current = saved.updated;
     setDoc(saved);
   }
@@ -79,17 +96,17 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   //new contexts/points are anchored to where the timeline is scrubbed to right now, so they show up at
   //that spot in the story (matching how the device anchors to the reading position)
   async function addContext(title: string, type: string) {
-    await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/contexts`, {
+    await edit(() => api(bookUrl("/contexts"), {
       method: "POST", body: JSON.stringify({ title, type, progress: scrub }),
     }).then(() => {}));
   }
   async function addPoint(key: string, text: string) {
-    await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/contexts/${encodeURIComponent(key)}/points`, {
+    await edit(() => api(bookUrl(`/contexts/${encodeURIComponent(key)}/points`), {
       method: "POST", body: JSON.stringify({ text, progress: scrub }),
     }).then(() => {}));
   }
   async function editPoint(key: string, ref: { id?: string; index: number }, text: string) {
-    await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/contexts/${encodeURIComponent(key)}/points`, {
+    await edit(() => api(bookUrl(`/contexts/${encodeURIComponent(key)}/points`), {
       method: "PATCH", body: JSON.stringify({ text, id: ref.id, index: ref.index }),
     }).then(() => {}));
   }
@@ -157,7 +174,7 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   async function importBook(file: File) {
     try {
       const data = await readJsonFile(file);
-      await edit(() => api(`/api/books/${encodeURIComponent(bookId)}/import`, { method: "POST", body: JSON.stringify(data) }).then(() => {}));
+      await edit(() => api(bookUrl("/import"), { method: "POST", body: JSON.stringify(data) }).then(() => {}));
     } catch (e) { alert("Import failed: " + (e as Error).message); }
   }
   function setTypeColor(t: string, color: string | null) {
@@ -167,6 +184,51 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
       saveTypeColors(n);
       return n;
     });
+  }
+
+  //switching profiles loads a fresh doc and starts a clean undo history (the stacks belong to the
+  //profile you were editing). the choice is remembered per book.
+  function switchProfile(id: string) {
+    if (id === profile) return;
+    saveProfile(bookId, id);
+    setUndoStack([]); setRedoStack([]); setSelected(null);
+    lastUpdated.current = undefined;
+    setProfile(id);
+  }
+  async function createProfile(name: string, copyCurrent: boolean) {
+    const made = await api<ProfileSummary>(`/api/books/${encodeURIComponent(bookId)}/profiles`, {
+      method: "POST", body: JSON.stringify({ name, copy_from: copyCurrent ? profile : null }),
+    });
+    await loadProfiles();
+    switchProfile(made.profile_id);
+  }
+  async function renameProfile(id: string, name: string) {
+    await api(`/api/books/${encodeURIComponent(bookId)}/profiles/${encodeURIComponent(id)}`, {
+      method: "PATCH", body: JSON.stringify({ name }),
+    });
+    await loadProfiles();
+  }
+  async function deleteProfile(id: string) {
+    try {
+      await api(`/api/books/${encodeURIComponent(bookId)}/profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch (e) { alert((e as Error).message); return; }
+    const rest = profiles.filter((p) => p.profile_id !== id);
+    await loadProfiles();
+    if (id === profile) switchProfile(rest[0]?.profile_id || "default");
+  }
+  //empty the active profile's notes (tombstoned so the cleared state survives sync). undoable.
+  function clearProfile() {
+    if (!doc) return;
+    if (!confirm("Clear all notes in this profile? The contexts, links and points are removed (you can undo).")) return;
+    mutate((d) => dq.clearAll(d));
+    setSelected(null);
+  }
+  //copy the active profile out into the standalone "Imported" set on the home page (leaves this one as is)
+  async function sendProfileToImported() {
+    try {
+      const r = await api<{ title: string }>(`/api/books/${encodeURIComponent(bookId)}/profiles/${encodeURIComponent(profile)}/to-external`, { method: "POST" });
+      alert(`Saved "${r.title}" to your Imported contexts on the Books screen.`);
+    } catch (e) { alert("Couldn't save: " + (e as Error).message); }
   }
 
   if (!doc) return <div className="h-full grid place-items-center text-ink-faint">Loading…</div>;
@@ -187,6 +249,9 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
           </p>
         </div>
         <span className="flex-1" />
+        <ProfilePicker profiles={profiles} activeId={profile}
+                       onSwitch={switchProfile} onCreate={createProfile} onRename={renameProfile} onDelete={deleteProfile}
+                       onExportExternal={sendProfileToImported} onClear={clearProfile} />
         <button className={btn} onClick={undo} disabled={!undoStack.length} title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶</button>
         <button className={btn} onClick={redo} disabled={!redoStack.length} title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↷</button>
         <button className={btn} onClick={exportBook} title="Download this book's contexts">Export</button>
