@@ -249,21 +249,6 @@ end
 function ContextSync:showLogin(touchmenu)
     local s = self:settings()
     local dialog
-    --TEMP keypad: the mac build has a bug where tapping the password field toggles "show password"
-    --instead of letting you type. these buttons append to the password field (index 3) so it can still
-    --be filled in; "Del" removes the last char. delete this whole keyrow once the typing bug is fixed.
-    local function pwkey(c)
-        return { text = c, callback = function()
-            local f = dialog.input_fields and dialog.input_fields[3]
-            if f then f:addChars(c) end
-        end }
-    end
-    local keyrow = {}
-    for _, c in ipairs({ "m", "a", "t", "c", "0" }) do keyrow[#keyrow + 1] = pwkey(c) end
-    keyrow[#keyrow + 1] = { text = "Del", callback = function()
-        local f = dialog.input_fields and dialog.input_fields[3]
-        if f then f:delChar() end
-    end }
     dialog = MultiInputDialog:new{
         title = _("Context Creator sync"),
         fields = {
@@ -271,7 +256,7 @@ function ContextSync:showLogin(touchmenu)
             { text = s.username or "", hint = _("username") },
             { text = "", hint = (s.password and s.password ~= "") and _("password (leave blank to keep)") or _("password"), text_type = "password" },
         },
-        buttons = { keyrow, {
+        buttons = { {
             { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
             {
                 text = _("Log in"),
