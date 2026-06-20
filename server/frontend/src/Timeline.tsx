@@ -42,13 +42,38 @@ export default function Timeline({ doc, devices = [], scrub, onScrub }: {
   const curStart = curChapter ? curChapter.progress : 0;
   const curEnd = cur >= 0 && cur + 1 < toc.length ? toc[cur + 1].progress : 1;
   const pct = Math.round(scrub * 100);
-  const caption = curChapter ? curChapter.title : toc.length ? "Before " + toc[0].title : "Whole book";
+
+  //once you've scrubbed to the tail end of a chapter (within NEXT_CHAPTER_AT of its span), name the
+  //chapter you're about to enter instead — e.g. at 99% through ch18 the caption reads ch19.
+  const NEXT_CHAPTER_AT = 0.99;
+  let nameIdx = cur;
+  if (cur >= 0 && cur + 1 < toc.length && curEnd > curStart
+      && (scrub - curStart) / (curEnd - curStart) >= NEXT_CHAPTER_AT) {
+    nameIdx = cur + 1;
+  }
+  const caption = nameIdx >= 0 ? toc[nameIdx].title : toc.length ? "Before " + toc[0].title : "Whole book";
+
+  //place a device on THIS timeline. the raw reading_progress is render-dependent, so a device drifts
+  //(by whole chapters) against a timeline another device built. when the device told us which chapter
+  //it's in, re-anchor by chapter (logical, identical across devices) + fraction through it; otherwise
+  //fall back to the raw fraction.
+  function deviceRp(d: DevicePosition): number {
+    if (d.chapter && typeof d.chapter_frac === "number" && toc.length) {
+      const i = toc.findIndex((c) => c.title === d.chapter);
+      if (i >= 0) {
+        const start = toc[i].progress;
+        const end = i + 1 < toc.length ? toc[i + 1].progress : 1;
+        return clamp01(start + d.chapter_frac * Math.max(0, end - start));
+      }
+    }
+    return clamp01(d.reading_progress);
+  }
 
   //one jump target per connected device (freshest first, as the server returns them). if none have
   //synced a position, fall back to the doc's single shared reading position.
   const targets: JumpTarget[] = devices
     .filter((d) => typeof d.reading_progress === "number")
-    .map((d) => ({ id: d.device_id, name: d.device_name || "KOReader", rp: clamp01(d.reading_progress), updated: d.updated }));
+    .map((d) => ({ id: d.device_id, name: d.device_name || "KOReader", rp: deviceRp(d), updated: d.updated }));
   if (!targets.length && typeof doc.reading_progress === "number") {
     targets.push({ id: "_doc", name: null, rp: clamp01(doc.reading_progress), updated: 0 });
   }
@@ -96,24 +121,31 @@ export default function Timeline({ doc, devices = [], scrub, onScrub }: {
         <button className={btnGhost} onClick={() => onScrub(1)} disabled={scrub >= 1}>Show all</button>
       </div>
 
-      <div className="relative h-2.5 rounded-full bg-paper-sunk border border-line overflow-hidden">
-        {/* band for the current chapter */}
+      <div className="relative pt-3">
+        {/* arrow pointing down at the block of the chapter you're currently in */}
         {curChapter && (
-          <div className="absolute top-0 bottom-0 bg-scrub/10 border-x border-scrub/40"
-               style={{ left: curStart * 100 + "%", width: (curEnd - curStart) * 100 + "%" }} />
+          <div className="absolute top-0 -translate-x-1/2 leading-none text-[11px] text-scrub select-none"
+               style={{ left: ((curStart + curEnd) / 2) * 100 + "%" }} aria-hidden="true">▼</div>
         )}
-        {/* "so far" fill */}
-        <div className="absolute left-0 top-0 bottom-0 bg-scrub/55 rounded-full" style={{ width: scrub * 100 + "%" }} />
-        {/* chapter boundary ticks */}
-        {toc.map((c, i) => (
-          <div key={i} className="absolute top-0 bottom-0 w-px bg-line-strong" style={{ left: c.progress * 100 + "%" }} />
-        ))}
-        {/* a marker per device's last-read point */}
-        {targets.map((t) => (
-          <div key={t.id} className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-ink rounded-full"
-               style={{ left: t.rp * 100 + "%" }}
-               title={t.name ? `${t.name} has read to ${Math.round(t.rp * 100)}%` : `You've read to ${Math.round(t.rp * 100)}%`} />
-        ))}
+        <div className="relative h-2.5 rounded-full bg-paper-sunk border border-line overflow-hidden">
+          {/* band for the current chapter */}
+          {curChapter && (
+            <div className="absolute top-0 bottom-0 bg-scrub/10 border-x border-scrub/40"
+                 style={{ left: curStart * 100 + "%", width: (curEnd - curStart) * 100 + "%" }} />
+          )}
+          {/* "so far" fill — square inner (right) edge; the track's rounding + clip keeps the far ends round */}
+          <div className="absolute left-0 top-0 bottom-0 bg-scrub/55" style={{ width: scrub * 100 + "%" }} />
+          {/* chapter boundary ticks */}
+          {toc.map((c, i) => (
+            <div key={i} className="absolute top-0 bottom-0 w-px bg-line-strong" style={{ left: c.progress * 100 + "%" }} />
+          ))}
+          {/* a marker per device's last-read point */}
+          {targets.map((t) => (
+            <div key={t.id} className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-ink rounded-full"
+                 style={{ left: t.rp * 100 + "%" }}
+                 title={t.name ? `${t.name} has read to ${Math.round(t.rp * 100)}%` : `You've read to ${Math.round(t.rp * 100)}%`} />
+          ))}
+        </div>
       </div>
 
       <input type="range" min={0} max={1} step={0.005} value={scrub} className="scrubber mt-2"

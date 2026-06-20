@@ -99,6 +99,10 @@ function ContextSyncClient:pushBook(book_id, doc, profile, name, device)
     if device and device.id and device.id ~= "" then
         q = q .. "&device_id=" .. urlencode(device.id)
         if device.name and device.name ~= "" then q = q .. "&device_name=" .. urlencode(device.name) end
+        if device.chapter and device.chapter ~= "" then q = q .. "&device_chapter=" .. urlencode(device.chapter) end
+        if type(device.chapter_frac) == "number" then
+            q = q .. "&device_chapter_frac=" .. urlencode(string.format("%.6f", device.chapter_frac))
+        end
     end
     return self:request("POST", "/api/sync/books/" .. book_id .. q, doc)
 end

@@ -183,6 +183,34 @@ function ContextStore:describeLocator(pos)
                 local okc, ch = pcall(function() return ui.toc:getTocTitleByPage(xp) end)
                 if okc and ch and ch ~= "" then res.chapter = ch end
             end
+            --fraction through the current chapter (0..1). chapter boundaries are logical (the same on
+            --every device), but the raw y/height progress is render-dependent and drifts between devices,
+            --so the webapp re-anchors a device onto a shared timeline as chapter + this fraction rather
+            --than trusting the bare fraction. only computed for the live position (pos == nil).
+            if pos == nil and ui.toc and ui.toc.toc and res.progress and height and height > 0 then
+                local items = ui.toc.toc
+                local function chprog(it)
+                    local lx = it and it.xpointer
+                    if not lx then return nil end
+                    local oky, yy = pcall(function() return doc:getPosFromXPointer(lx) end)
+                    if oky and yy then return yy / height end
+                    return nil
+                end
+                local startp, nextp
+                for i = 1, #items do
+                    local p = chprog(items[i])
+                    if p ~= nil then
+                        if p <= res.progress + 1e-9 then startp = p
+                        else nextp = p; break end
+                    end
+                end
+                if startp then
+                    nextp = nextp or 1
+                    if nextp > startp then
+                        res.chapter_frac = math.max(0, math.min(1, (res.progress - startp) / (nextp - startp)))
+                    end
+                end
+            end
         end
     else
         --paged (pdf): key off the page number

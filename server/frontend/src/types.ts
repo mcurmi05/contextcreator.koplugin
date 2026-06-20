@@ -48,8 +48,13 @@ export interface Doc {
 //a named context document within a book (alternate note-set)
 export interface ProfileSummary { profile_id: string; name: string; updated?: number; }
 
-//where one koreader device has read up to, so "jump to current" can offer each device's spot
-export interface DevicePosition { device_id: string; device_name: string; reading_progress: number; updated: number; }
+//where one koreader device has read up to, so "jump to current" can offer each device's spot.
+//chapter (+ chapter_frac, fraction through it) lets the web re-anchor a device onto a shared timeline
+//that another device built — the raw reading_progress is render-dependent and drifts between devices.
+export interface DevicePosition {
+  device_id: string; device_name: string; reading_progress: number; updated: number;
+  chapter?: string; chapter_frac?: number | null;
+}
 
 //locate a dot point for editing/deletion: by stable id when it has one, else by list index
 export interface PointRef { id?: string; index: number }

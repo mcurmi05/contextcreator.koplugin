@@ -9,6 +9,7 @@ G_reader_settings under "contextcreator_sync" = { enabled, server, username, pas
 authenticates with the same account credentials as the web app (HTTP Basic auth).
 ]]
 
+local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
 local MultiInputDialog = require("ui/widget/multiinputdialog")
 local NetworkMgr = require("ui/network/manager")
@@ -104,6 +105,20 @@ function ContextSync:stopPeriodic()
     end
 end
 
+--a 401 means the stored credentials no longer work (typically the password was changed on the web).
+--stop the periodic retries so we don't hammer the server, and prompt to log back in. guarded so the
+--background polling can't spam the prompt: it fires once, then stays quiet until a login is attempted.
+function ContextSync:authFailed()
+    if self._auth_prompted then return end
+    self._auth_prompted = true
+    self:stopPeriodic()
+    UIManager:show(ConfirmBox:new{
+        text = _("Context Creator sync was rejected — your saved password no longer works (it may have been changed on the web). Log in again?"),
+        ok_text = _("Log in"),
+        ok_callback = function() self:showLogin() end,
+    })
+end
+
 --push local -> server merge -> adopt merged. interactive=true shows feedback (for the manual "Sync now").
 function ContextSync:syncNow(interactive)
     if not self:isConfigured() then
@@ -132,17 +147,24 @@ function ContextSync:syncNow(interactive)
     --push (including periodic ones) so it tracks reading, not just note edits. the merged result we adopt
     --carries it back, so the local file stays current too.
     local doc = self.store:load()
-    local progress = self.store:describeLocator(nil).progress
-    if progress then doc.reading_progress = progress end
+    local loc = self.store:describeLocator(nil)
+    if loc.progress then doc.reading_progress = loc.progress end
     --push the active profile, passing its name so a freshly created one registers server-side, and this
-    --device's id/name so the server records its reading position separately from other devices'
+    --device's id/name + current chapter so the server records this device's position separately from
+    --other devices' (the chapter lets the webapp re-anchor it correctly onto a shared, cross-device timeline)
+    local dev = self:deviceInfo()
+    dev.chapter = loc.chapter
+    dev.chapter_frac = loc.chapter_frac
     local profile = self.store:getProfileId()
-    local ok, merged = client:pushBook(book_id, doc, profile, self.store:getProfileName(profile), self:deviceInfo())
+    local ok, merged = client:pushBook(book_id, doc, profile, self.store:getProfileName(profile), dev)
     if ok and type(merged) == "table" and merged.contexts then
+        self._auth_prompted = false -- the credentials clearly work, re-arm the 401 prompt for next time
         self.store:replace(merged) -- adopt the merged result without re-triggering a sync
         if interactive then
             UIManager:show(InfoMessage:new{ text = _("Synced.") })
         end
+    elseif merged == 401 then
+        self:authFailed() -- stale password: prompt to log back in (shown for background syncs too)
     elseif interactive then
         UIManager:show(InfoMessage:new{ text = T(_("Sync failed (%1)."), tostring(merged)) })
     end
@@ -186,7 +208,8 @@ function ContextSync:syncLibrary()
     local books = self:buildLibrary()
     if #books == 0 then return end
     local s = self:settings()
-    ContextSyncClient:new(s.server, s.username, s.password):pushLibrary(books)
+    local ok, resp = ContextSyncClient:new(s.server, s.username, s.password):pushLibrary(books)
+    if not ok and resp == 401 then self:authFailed() end
 end
 
 --pull the book's profile list from the server and fold it into the local list, so profiles created on
@@ -199,7 +222,11 @@ function ContextSync:syncProfiles()
     if not book_id then return end
     local s = self:settings()
     local ok, list = ContextSyncClient:new(s.server, s.username, s.password):listProfiles(book_id)
-    if not ok or type(list) ~= "table" then return end
+    if not ok then
+        if list == 401 then self:authFailed() end
+        return
+    end
+    if type(list) ~= "table" then return end
     local by_id, order = {}, {}
     for _, p in ipairs(self.store:getProfileList()) do
         if not by_id[p.id] then by_id[p.id] = { id = p.id, name = p.name }; order[#order + 1] = p.id end
@@ -222,6 +249,21 @@ end
 function ContextSync:showLogin(touchmenu)
     local s = self:settings()
     local dialog
+    --TEMP keypad: the mac build has a bug where tapping the password field toggles "show password"
+    --instead of letting you type. these buttons append to the password field (index 3) so it can still
+    --be filled in; "Del" removes the last char. delete this whole keyrow once the typing bug is fixed.
+    local function pwkey(c)
+        return { text = c, callback = function()
+            local f = dialog.input_fields and dialog.input_fields[3]
+            if f then f:addChars(c) end
+        end }
+    end
+    local keyrow = {}
+    for _, c in ipairs({ "m", "a", "t", "c", "0" }) do keyrow[#keyrow + 1] = pwkey(c) end
+    keyrow[#keyrow + 1] = { text = "Del", callback = function()
+        local f = dialog.input_fields and dialog.input_fields[3]
+        if f then f:delChar() end
+    end }
     dialog = MultiInputDialog:new{
         title = _("Context Creator sync"),
         fields = {
@@ -229,7 +271,7 @@ function ContextSync:showLogin(touchmenu)
             { text = s.username or "", hint = _("username") },
             { text = "", hint = (s.password and s.password ~= "") and _("password (leave blank to keep)") or _("password"), text_type = "password" },
         },
-        buttons = {{
+        buttons = { keyrow, {
             { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
             {
                 text = _("Log in"),
@@ -241,6 +283,7 @@ function ContextSync:showLogin(touchmenu)
                     if password and password ~= "" then ns.password = password end
                     ns.enabled = true -- logging in turns sync on
                     self:saveSettings(ns)
+                    self._auth_prompted = false -- re-arm the 401 prompt: if these creds are also bad, warn again
                     UIManager:close(dialog)
                     if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
                     UIManager:scheduleIn(0.3, function() self:syncNow(true) end) -- test the credentials

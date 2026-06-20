@@ -14,9 +14,11 @@ from .sync import _normalize, merge, new_doc
 DEFAULT_PID = "default"
 
 
-def record_device_position(session, user_id, book_id, device_id, reading_progress, *, device_name=None):
+def record_device_position(session, user_id, book_id, device_id, reading_progress, *,
+                           device_name=None, chapter=None, chapter_frac=None):
     #remember where one device has read up to, so the web can offer a per-device "jump to current".
-    #upsert by (user, book, device); ignored when there's no usable position or no device id.
+    #upsert by (user, book, device); ignored when there's no usable position or no device id. the chapter
+    #(+ fraction through it) is what lets the web re-anchor this device onto a shared cross-device timeline.
     if not device_id or not isinstance(reading_progress, (int, float)) or isinstance(reading_progress, bool):
         return
     rp = max(0.0, min(1.0, float(reading_progress)))
@@ -33,6 +35,12 @@ def record_device_position(session, user_id, book_id, device_id, reading_progres
     row.updated = docops.now()
     if device_name and device_name.strip():
         row.device_name = device_name.strip()
+    #chapter is sent on every sync; treat empty as "unknown" but always refresh frac alongside it
+    if chapter is not None:
+        row.chapter = chapter.strip()
+        row.chapter_frac = (max(0.0, min(1.0, float(chapter_frac)))
+                            if isinstance(chapter_frac, (int, float)) and not isinstance(chapter_frac, bool)
+                            else None)
 
 
 def list_device_positions(session, user_id, book_id):

@@ -70,15 +70,18 @@ def pull_book(book_id: str, profile: str = DEFAULT_PID, user: User = Depends(get
 @router.post("/books/{book_id}")
 def push_book(book_id: str, body: dict, profile: str = DEFAULT_PID, name: str | None = None,
               device_id: str | None = None, device_name: str | None = None,
+              device_chapter: str | None = None, device_chapter_frac: float | None = None,
               user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
     #additively merge the device's doc for one profile into the stored one, save, return the merged result.
     #this is the device-authoritative path: the device owns the reading position + chapter toc + book meta.
     book, prof, merged = profiles.merge_into_profile(
         session, user.id, book_id, body or {}, profile_id=profile, profile_name=name, from_device=True)
     #stamp this device's own reading position too (the shared one is last-write-wins), so the web can
-    #later offer "jump to current" for whichever device the reader is actually on.
+    #later offer "jump to current" for whichever device the reader is actually on. the chapter lets the
+    #web re-anchor it correctly even when the shared timeline was built by a different device.
     if device_id:
         profiles.record_device_position(session, user.id, book_id, device_id,
-                                        merged.get("reading_progress"), device_name=device_name)
+                                        merged.get("reading_progress"), device_name=device_name,
+                                        chapter=device_chapter, chapter_frac=device_chapter_frac)
     session.commit()
     return profiles.compose(book, prof)

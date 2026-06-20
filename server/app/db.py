@@ -30,6 +30,13 @@ def _migrate():
             conn.exec_driver_sql("ALTER TABLE book ADD COLUMN toc_json VARCHAR DEFAULT '[]'")
         if "origin_id" not in cols:
             conn.exec_driver_sql("ALTER TABLE book ADD COLUMN origin_id VARCHAR DEFAULT ''")
+        #deviceposition gained chapter columns after the table already existed for some users
+        dp_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(deviceposition)")}
+        if dp_cols:  #table exists
+            if "chapter" not in dp_cols:
+                conn.exec_driver_sql("ALTER TABLE deviceposition ADD COLUMN chapter VARCHAR DEFAULT ''")
+            if "chapter_frac" not in dp_cols:
+                conn.exec_driver_sql("ALTER TABLE deviceposition ADD COLUMN chapter_frac FLOAT")
         conn.commit()
     _seed_default_profiles()
 

@@ -57,7 +57,9 @@ class DevicePosition(SQLModel, table=True):
     book_id: str = Field(index=True)
     device_id: str = Field(index=True)   #stable token the device generates once and reuses
     device_name: str = ""                #friendly label (koreader model by default)
-    reading_progress: float = 0.0        #0..1 fraction this device last read up to
+    reading_progress: float = 0.0        #0..1 fraction this device last read up to (render-dependent)
+    chapter: str = ""                    #title of the chapter this device is in (logical, cross-device)
+    chapter_frac: float | None = None    #0..1 fraction through that chapter, for re-anchoring on the web
     updated: int = 0                     #unix seconds of the last sync from this device
 
 #a book known to be on the koreader device (from its read history) that may not have a contexts doc yet.

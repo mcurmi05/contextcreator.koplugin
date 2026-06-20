@@ -156,7 +156,8 @@ def list_book_devices(book_id: str, user: User = Depends(get_current_user), sess
     _get_row(session, user, book_id)
     rows = profiles.list_device_positions(session, user.id, book_id)
     return [{"device_id": r.device_id, "device_name": r.device_name,
-             "reading_progress": r.reading_progress, "updated": r.updated} for r in rows]
+             "reading_progress": r.reading_progress, "chapter": r.chapter,
+             "chapter_frac": r.chapter_frac, "updated": r.updated} for r in rows]
 
 
 @router.get("/books/{book_id}")
