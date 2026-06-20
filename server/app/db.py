@@ -30,6 +30,16 @@ def _migrate():
             conn.exec_driver_sql("ALTER TABLE book ADD COLUMN toc_json VARCHAR DEFAULT '[]'")
         if "origin_id" not in cols:
             conn.exec_driver_sql("ALTER TABLE book ADD COLUMN origin_id VARCHAR DEFAULT ''")
+        if "cover" not in cols:
+            conn.exec_driver_sql("ALTER TABLE book ADD COLUMN cover VARCHAR DEFAULT ''")
+        #covers arrived on the device catalog after libraryentry already existed for some users
+        le_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(libraryentry)")}
+        if le_cols and "cover" not in le_cols:
+            conn.exec_driver_sql("ALTER TABLE libraryentry ADD COLUMN cover VARCHAR DEFAULT ''")
+        if le_cols and "series" not in le_cols:
+            conn.exec_driver_sql("ALTER TABLE libraryentry ADD COLUMN series VARCHAR DEFAULT ''")
+        if le_cols and "series_index" not in le_cols:
+            conn.exec_driver_sql("ALTER TABLE libraryentry ADD COLUMN series_index INTEGER DEFAULT 0")
         #deviceposition gained chapter columns after the table already existed for some users
         dp_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(deviceposition)")}
         if dp_cols:  #table exists

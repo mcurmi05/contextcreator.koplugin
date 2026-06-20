@@ -118,8 +118,9 @@ function ContextSyncClient:listProfiles(book_id)
     return self:request("GET", "/api/sync/books/" .. book_id .. "/profiles")
 end
 
---report the device's book catalog (a list of { book_id, title, authors }) so the web ui can offer to
---start contexts for books that have no notes yet
+--report the device's book catalog (a list of { book_id, title, authors, cover? }) so the web ui can
+--offer to start contexts for books that have no notes yet, and show cover art. cover is a data: url,
+--sent only the first time a book is seen.
 function ContextSyncClient:pushLibrary(books)
     return self:request("POST", "/api/sync/library", rapidjson.array(books))
 end

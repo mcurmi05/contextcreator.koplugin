@@ -18,10 +18,19 @@ const byOrder = (a: BookSummary, b: BookSummary) =>
 
 const isExternal = (b: BookSummary) => b.source === "external";
 
-export default function BookList({ onOpen }: { onOpen: (bookId: string) => void }) {
+//small cover thumbnail; covers are data: urls synced from the device. renders nothing when absent
+//(e.g. imported docs, or books whose cover the device hasn't extracted yet), leaving the card unchanged.
+function Cover({ src, title }: { src?: string; title?: string }) {
+  if (!src) return null;
+  return (
+    <img src={src} alt={title ? `${title} cover` : "cover"} loading="lazy"
+         className="w-10 h-14 shrink-0 rounded object-cover border border-line bg-paper-sunk" />
+  );
+}
+
+export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bookId: string) => void; showUnstarted?: boolean }) {
   const [books, setBooks] = useState<BookSummary[] | null>(null);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
-  const [libOpen, setLibOpen] = useState(false);
   const [attachFor, setAttachFor] = useState<string | null>(null); //external book_id being attached
   const [editing, setEditing] = useState<string | null>(null);  //book_id whose series is being edited
   const [name, setName] = useState("");
@@ -138,16 +147,28 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
 
   if (!books) return <p className="text-ink-faint">Loading…</p>;
 
-  const deviceBooks = books.filter((b) => !isExternal(b));
   const externalBooks = books.filter(isExternal);
 
-  //group device books by series, named series first (alphabetical), unfiled books last
-  const groups = new Map<string, BookSummary[]>();
+  //one grid for every device book: those with contexts (real Book rows — draggable, seriesable) plus the
+  //device's other books from the read-history catalog (no notes yet, shown dimmed with "start contexts",
+  //hidden when the user turns them off in settings). library entries already exclude anything that has a
+  //Book row, so there are no duplicates.
+  type DeviceCard = BookSummary & { started: boolean };
+  const startedBooks: DeviceCard[] = books.filter((b) => !isExternal(b)).map((b) => ({ ...b, started: true }));
+  const libraryCards: DeviceCard[] = showUnstarted
+    ? library.map((e) => ({ book_id: e.book_id, title: e.title, authors: e.authors, cover: e.cover, series: e.series || "", series_index: e.series_index ?? 0, started: false }))
+    : [];
+  const deviceBooks: DeviceCard[] = [...startedBooks, ...libraryCards];
+
+  //group by series, named series first (alphabetical), the unfiled bucket (incl. all un-started books) last
+  const groups = new Map<string, DeviceCard[]>();
   for (const b of deviceBooks) {
     const s = b.series || "";
     if (!groups.has(s)) groups.set(s, []);
     groups.get(s)!.push(b);
   }
+  //within a group, started (annotated) books first, then the "start contexts" ones
+  const cardOrder = (a: DeviceCard, b: DeviceCard) => Number(b.started) - Number(a.started) || byOrder(a, b);
   const named = [...groups.keys()].filter((s) => s).sort((a, b) => a.localeCompare(b));
   const sections = [...named, ...(groups.has("") ? [""] : [])];
 
@@ -161,40 +182,15 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
       </div>
       <datalist id="series-list">{named.map((s) => <option key={s} value={s} />)}</datalist>
 
-      {/* books on the device that don't have contexts yet — start one from here */}
-      {library.length > 0 && (
-        <div className="mb-5 rounded-xl border border-line bg-paper-card overflow-hidden">
-          <button className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-paper-sunk transition"
-                  onClick={() => setLibOpen((v) => !v)}>
-            <span className="text-sm font-medium">Other books on your device</span>
-            <span className="text-xs text-ink-faint tabular-nums">{library.length}</span>
-            <span className="flex-1" />
-            <span className="text-ink-faint text-xs">{libOpen ? "▾" : "▸"} no notes yet</span>
-          </button>
-          {libOpen && (
-            <div className="px-3 pb-3 pt-1 flex flex-wrap gap-2">
-              {library.map((e) => (
-                <button key={e.book_id} onClick={() => adopt(e.book_id)}
-                        className="w-56 text-left rounded-lg border border-line px-3 py-2 hover:border-accent-ring hover:shadow-card transition">
-                  <strong className="block truncate text-sm">{e.title || e.book_id}</strong>
-                  {e.authors && <span className="block text-xs text-ink-faint truncate">{e.authors}</span>}
-                  <span className="block text-[11px] text-accent-hover mt-1">+ start contexts</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {deviceBooks.length === 0 && (
         <div className="rounded-xl border border-dashed border-line-strong bg-paper-card p-6 text-center mb-5">
-          <p className="font-medium">No books with contexts yet</p>
-          <p className="text-sm text-ink-faint mt-1">Take notes in KOReader, or start one from a device book above.</p>
+          <p className="font-medium">No books yet</p>
+          <p className="text-sm text-ink-faint mt-1">Open a book in KOReader and sync — your library shows up here, ready to annotate.</p>
         </div>
       )}
 
       {sections.map((series) => {
-        const list = (groups.get(series) || []).slice().sort(byOrder);
+        const list = (groups.get(series) || []).slice().sort(cardOrder);
         const isDropGroup = hint?.series === series && hint.before === null;
         return (
           <div key={series || "_none"} className="mb-5"
@@ -206,50 +202,64 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
               </span>
               <span className="text-xs text-ink-faint tabular-nums">{list.length}</span>
             </div>
-            <div className={`flex flex-wrap items-start gap-2.5 rounded-xl transition ${isDropGroup ? "ring-2 ring-accent-ring/50 bg-accent-soft/40 p-1.5 -m-1.5" : ""}`}>
+            <div className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 items-start gap-2.5 rounded-xl transition ${isDropGroup ? "ring-2 ring-accent-ring/50 bg-accent-soft/40 p-1.5 -m-1.5" : ""}`}>
               {list.map((b) => {
-                const dropBefore = hint?.series === series && hint.before === b.book_id;
+                const dropBefore = b.started && hint?.series === series && hint.before === b.book_id;
                 return (
-                  <div key={b.book_id} draggable
-                       onDragStart={(e) => { setDragId(b.book_id); e.dataTransfer.effectAllowed = "move"; }}
+                  <div key={b.book_id} draggable={b.started}
+                       onDragStart={(e) => { if (!b.started) return; setDragId(b.book_id); e.dataTransfer.effectAllowed = "move"; }}
                        onDragEnd={() => { setDragId(null); setHint(null); }}
-                       onDragOver={(e) => { if (dragId) { e.preventDefault(); e.stopPropagation(); setHint({ series, before: b.book_id }); } }}
-                       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void moveBook(series, b.book_id); }}
-                       className={`relative w-64 rounded-xl border bg-paper-card p-4 shadow-card transition cursor-grab active:cursor-grabbing hover:shadow-pop hover:border-accent-ring ${
+                       onDragOver={(e) => { if (dragId && b.started) { e.preventDefault(); e.stopPropagation(); setHint({ series, before: b.book_id }); } }}
+                       onDrop={(e) => { if (!b.started) return; e.preventDefault(); e.stopPropagation(); void moveBook(series, b.book_id); }}
+                       className={`relative w-full rounded-xl border bg-paper-card p-3 shadow-card transition hover:shadow-pop hover:border-accent-ring ${
+                         b.started ? "cursor-grab active:cursor-grabbing" : "cursor-pointer opacity-65 hover:opacity-100"} ${
                          dragId === b.book_id ? "opacity-40" : ""} ${dropBefore ? "border-accent" : "border-line"}`}>
                     {dropBefore && <span className="absolute -left-1.5 top-2 bottom-2 w-1 rounded-full bg-accent" />}
-                    <button className="group block w-full text-left" onClick={() => open(b)}>
-                      <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
-                      {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
+                    <button className="group flex w-full items-start gap-2.5 text-left"
+                            onClick={() => (b.started ? open(b) : adopt(b.book_id))}>
+                      <Cover src={b.cover} title={b.title} />
+                      <span className="min-w-0 flex-1">
+                        <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
+                        {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
+                      </span>
                     </button>
-                    {(b.profiles?.length ?? 0) >= 1 && (
-                      <label className="mt-2 block">
-                        <span className="block text-[10px] uppercase tracking-wide text-ink-faint mb-0.5">Profile</span>
-                        {profileDropdown(b)}
-                      </label>
+                    {b.started ? (
+                      <>
+                        {(b.profiles?.length ?? 0) >= 1 && (
+                          <label className="mt-2 block">
+                            <span className="block text-[10px] uppercase tracking-wide text-ink-faint mb-0.5">Profile</span>
+                            {profileDropdown(b)}
+                          </label>
+                        )}
+                        <div className="mt-2 pt-2 border-t border-line">
+                          {editing === b.book_id ? (
+                            <form onSubmit={(e) => { e.preventDefault(); void saveSeries(b.book_id); }}>
+                              <div className="flex gap-1.5 items-center">
+                                <input autoFocus list="series-list" className={`${input} flex-1 py-1 min-w-0`} placeholder="series name" value={name}
+                                       onChange={(e) => setName(e.target.value)}
+                                       onKeyDown={(e) => { if (e.key === "Escape") { setEditing(null); setError(""); } }} />
+                                <input type="number" min={1} className={`${input} w-14 py-1`} placeholder="#" value={pos}
+                                       onChange={(e) => setPos(e.target.value)} />
+                              </div>
+                              <div className="flex gap-1.5 mt-1.5">
+                                <button type="submit" className={`${btnAccent} py-1`}>Save</button>
+                                <button type="button" className={`${btn} py-1`} onClick={() => { setEditing(null); setError(""); }}>Cancel</button>
+                              </div>
+                            </form>
+                          ) : (
+                            <button className="text-xs text-ink-soft hover:text-accent-hover transition"
+                                    onClick={() => { setEditing(b.book_id); setName(b.series || ""); setPos(b.series ? String((b.series_index ?? 0) + 1) : ""); setError(""); }}>
+                              {b.series ? `${b.series} · #${(b.series_index ?? 0) + 1}` : "+ Add to a series"}
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-2 pt-2 border-t border-line">
+                        <button className="text-xs font-medium text-accent-hover hover:underline transition"
+                                onClick={() => adopt(b.book_id)}>+ start contexts</button>
+                      </div>
                     )}
-                    <div className="mt-2 pt-2 border-t border-line">
-                      {editing === b.book_id ? (
-                        <form onSubmit={(e) => { e.preventDefault(); void saveSeries(b.book_id); }}>
-                          <div className="flex gap-1.5 items-center">
-                            <input autoFocus list="series-list" className={`${input} flex-1 py-1 min-w-0`} placeholder="series name" value={name}
-                                   onChange={(e) => setName(e.target.value)}
-                                   onKeyDown={(e) => { if (e.key === "Escape") { setEditing(null); setError(""); } }} />
-                            <input type="number" min={1} className={`${input} w-14 py-1`} placeholder="#" value={pos}
-                                   onChange={(e) => setPos(e.target.value)} />
-                          </div>
-                          <div className="flex gap-1.5 mt-1.5">
-                            <button type="submit" className={`${btnAccent} py-1`}>Save</button>
-                            <button type="button" className={`${btn} py-1`} onClick={() => { setEditing(null); setError(""); }}>Cancel</button>
-                          </div>
-                        </form>
-                      ) : (
-                        <button className="text-xs text-ink-soft hover:text-accent-hover transition"
-                                onClick={() => { setEditing(b.book_id); setName(b.series || ""); setPos(b.series ? String((b.series_index ?? 0) + 1) : ""); setError(""); }}>
-                          {b.series ? `${b.series} · #${(b.series_index ?? 0) + 1}` : "+ Add to a series"}
-                        </button>
-                      )}
-                    </div>
                   </div>
                 );
               })}
@@ -277,9 +287,12 @@ export default function BookList({ onOpen }: { onOpen: (bookId: string) => void 
           <div className="flex flex-wrap items-start gap-2.5">
             {externalBooks.map((b) => (
               <div key={b.book_id} className="w-64 rounded-xl border border-line bg-paper-card p-4 shadow-card">
-                <button className="group block w-full text-left" onClick={() => open(b)}>
-                  <strong className="block truncate group-hover:text-accent-hover transition">{b.title || "Imported contexts"}</strong>
-                  {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
+                <button className="group flex w-full items-start gap-2.5 text-left" onClick={() => open(b)}>
+                  <Cover src={b.cover} title={b.title} />
+                  <span className="min-w-0 flex-1">
+                    <strong className="block truncate group-hover:text-accent-hover transition">{b.title || "Imported contexts"}</strong>
+                    {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
+                  </span>
                 </button>
                 {(b.profiles?.length ?? 0) >= 1 && (
                   <label className="mt-2 block">

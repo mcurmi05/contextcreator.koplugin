@@ -71,7 +71,7 @@ def list_books(user: User = Depends(get_current_user), session: Session = Depend
     for b in books:
         profs = profiles.list_profiles(session, user.id, b.book_id)
         out.append({
-            "book_id": b.book_id, "title": b.title, "authors": b.authors,
+            "book_id": b.book_id, "title": b.title, "authors": b.authors, "cover": b.cover,
             "series": b.series, "series_index": b.series_index, "source": b.source, "updated": b.updated,
             "profiles": [{"profile_id": p.profile_id, "name": p.name, "updated": p.updated} for p in profs],
         })
@@ -331,7 +331,8 @@ def list_library(user: User = Depends(get_current_user), session: Session = Depe
     #books known to be on the device (from its read history) that don't have a contexts book yet
     have = set(session.exec(select(Book.book_id).where(Book.user_id == user.id)).all())
     rows = session.exec(select(LibraryEntry).where(LibraryEntry.user_id == user.id)).all()
-    return [{"book_id": r.book_id, "title": r.title, "authors": r.authors}
+    return [{"book_id": r.book_id, "title": r.title, "authors": r.authors, "cover": r.cover,
+             "series": r.series, "series_index": r.series_index}
             for r in rows if r.book_id not in have]
 
 
@@ -346,7 +347,12 @@ def adopt_library_book(book_id: str, user: User = Depends(get_current_user), ses
     entry = session.exec(select(LibraryEntry).where(LibraryEntry.user_id == user.id, LibraryEntry.book_id == book_id)).first()
     title = entry.title if entry else ""
     authors = entry.authors if entry else ""
-    book = Book(user_id=user.id, book_id=book_id, title=title, authors=authors, source="device", updated=docops.now())
+    cover = entry.cover if entry else ""
+    #seed the web grouping from the book's own metadata series; the user can still re-group by dragging
+    series = entry.series if entry else ""
+    series_index = entry.series_index if entry else 0
+    book = Book(user_id=user.id, book_id=book_id, title=title, authors=authors, cover=cover,
+                series=series, series_index=series_index, source="device", updated=docops.now())
     session.add(book)
     doc = new_doc()
     doc["book"] = {"id": book_id, "title": title, "authors": authors}

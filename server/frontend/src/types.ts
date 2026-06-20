@@ -74,8 +74,8 @@ export interface GraphEditOps {
   deleteRelPoint: (id: string, ref: PointRef) => void;
 }
 
-export interface BookSummary { book_id: string; title?: string; authors?: string; series?: string; series_index?: number; source?: string; updated?: number; profiles?: ProfileSummary[]; }
+export interface BookSummary { book_id: string; title?: string; authors?: string; cover?: string; series?: string; series_index?: number; source?: string; updated?: number; profiles?: ProfileSummary[]; }
 //a book on the device (from its read history) that has no contexts doc yet
-export interface LibraryEntry { book_id: string; title?: string; authors?: string; }
+export interface LibraryEntry { book_id: string; title?: string; authors?: string; cover?: string; series?: string; series_index?: number; }
 export interface User { id: number; username: string; is_admin?: boolean; }
 export type Selected = { kind: "context" | "relationship"; id: string } | null;

@@ -179,6 +179,15 @@ function ContextCreator:onContextCreatorSync()
     return true
 end
 
+--koreader broadcasts this when a book's metadata or cover changes (e.g. the user sets a custom cover or
+--edits the title). while a book is open that's the current book, so re-sync just it, right away.
+function ContextCreator:onBookMetadataChanged()
+    if self.sync and self.store then
+        local file = self.store:getBookFile()
+        UIManager:scheduleIn(0.1, function() self.sync:syncBookMeta(file) end) --let the event finish first
+    end
+end
+
 --stop polling and flush any pending sync when the book closes
 function ContextCreator:onCloseDocument()
     if self.sync then

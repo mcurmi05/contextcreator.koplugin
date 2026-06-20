@@ -86,8 +86,8 @@ export default function App() {
 
       <main className="flex-1 min-h-0">
         {phase === "books" && (
-          <div className="max-w-3xl mx-auto px-5 py-8">
-            <BookList onOpen={(id) => { setBookId(id); setPhase("book"); }} />
+          <div className="max-w-6xl mx-auto px-4 py-8">
+            <BookList showUnstarted={theme.showUnstarted} onOpen={(id) => { setBookId(id); setPhase("book"); }} />
           </div>
         )}
         {phase === "book" && bookId && (

@@ -44,15 +44,33 @@ def push_library(body: list[dict], user: User = Depends(get_sync_user), session:
         if not bid:
             continue
         seen += 1
+        cover = it.get("cover") or ""
+        series = it.get("series") or ""
+        sidx = int(it.get("series_index") or 0)
         row = session.exec(
             select(LibraryEntry).where(LibraryEntry.user_id == user.id, LibraryEntry.book_id == bid)
         ).first()
         if row:
             row.title = it.get("title") or row.title
             row.authors = it.get("authors") or row.authors
+            if cover:
+                row.cover = cover
+            #only set series when the device actually sent one, so a later metadata-less push (e.g. a book
+            #whose cover is already done) doesn't wipe a series we resolved earlier
+            if series:
+                row.series = series
+                row.series_index = sidx
         else:
-            session.add(LibraryEntry(user_id=user.id, book_id=bid,
-                                     title=it.get("title") or "", authors=it.get("authors") or ""))
+            session.add(LibraryEntry(user_id=user.id, book_id=bid, title=it.get("title") or "",
+                                     authors=it.get("authors") or "", cover=cover, series=series, series_index=sidx))
+        #a book with notes lives as a Book (and is filtered out of /api/library), so push the cover there too.
+        #a cover in the payload is always freshly extracted (first time or a changed one), so overwrite it.
+        if cover:
+            book = session.exec(
+                select(Book).where(Book.user_id == user.id, Book.book_id == bid)
+            ).first()
+            if book:
+                book.cover = cover
     session.commit()
     return {"ok": True, "count": seen}
 

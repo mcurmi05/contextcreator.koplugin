@@ -22,6 +22,7 @@ class Book(SQLModel, table=True):
     book_id: str = Field(index=True)
     title: str = ""
     authors: str = ""
+    cover: str = ""           #cover art as a data: url (jpeg thumbnail), synced from the device; "" if none
     series: str = ""          #optional grouping label, set from the web ui
     series_index: int = 0     #order within the series (left to right)
     source: str = "device"    #"device" syncs to koreader, "external" is a web-only imported doc
@@ -71,4 +72,7 @@ class LibraryEntry(SQLModel, table=True):
     book_id: str = Field(index=True)
     title: str = ""
     authors: str = ""
+    cover: str = ""           #cover art as a data: url (jpeg thumbnail), synced from the device; "" if none
+    series: str = ""          #series name from the book's own metadata, so unadopted books still group
+    series_index: int = 0     #0-based order within the series (converted from the book's 1-based metadata)
     updated: int = 0

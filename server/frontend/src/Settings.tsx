@@ -130,6 +130,13 @@ function Appearance({ theme, set, onLogoFile }: {
         </label>
         {theme.logo && <button className={btn} onClick={() => set({ logo: null })}>Remove</button>}
       </Row>
+      <Row label="Home page">
+        <label className="flex items-center gap-2.5 cursor-pointer">
+          <input type="checkbox" checked={theme.showUnstarted} className="h-4 w-4 accent-accent cursor-pointer"
+                 onChange={(e) => set({ showUnstarted: e.target.checked })} />
+          <span className="text-sm">Show books without contexts yet</span>
+        </label>
+      </Row>
       <div>
         <button className={btn} onClick={() => set({ ...DEFAULT_THEME })}>Reset appearance to defaults</button>
       </div>
