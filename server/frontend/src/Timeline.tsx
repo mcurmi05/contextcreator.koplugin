@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { btnGhost } from "./ui";
+import { btn, btnAccent, btnGhost } from "./ui";
 import type { DevicePosition, Doc, TocEntry } from "./types";
 
 //a place "jump to current" can send the scrubber: a koreader device's last-read spot. when no device has
@@ -20,8 +20,10 @@ function ago(updated: number): string {
 
 //narrative-progress scrubber (0..1 through the book). the filled portion is "what's happened so far";
 //chapter boundaries are faint ticks, the current chapter is banded, and the caption reads "<chapter> · NN%".
-export default function Timeline({ doc, devices = [], scrub, onScrub }: {
+export default function Timeline({ doc, devices = [], scrub, onScrub, onAddContext, onAddRelationship }: {
   doc: Doc; devices?: DevicePosition[]; scrub: number; onScrub: (v: number) => void;
+  onAddContext?: () => void;       //when set, show an accent "Add context" button (graph view)
+  onAddRelationship?: () => void;  //when set, show an "Add relationship" button next to it
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -85,6 +87,17 @@ export default function Timeline({ doc, devices = [], scrub, onScrub }: {
         <strong className="text-sm truncate">{caption}</strong>
         <span className="text-sm text-ink-faint tabular-nums">· {pct}%</span>
         <span className="flex-1" />
+
+        {onAddContext && (
+          <button className={btnAccent} onClick={onAddContext} title="Add a new context at the current timeline point">
+            Add context
+          </button>
+        )}
+        {onAddRelationship && (
+          <button className={btn} onClick={onAddRelationship} title="Link two contexts with a relationship">
+            Add relationship
+          </button>
+        )}
 
         {/* one device -> a plain "jump to current"; several -> a picker so you can choose which device */}
         {targets.length === 1 && (

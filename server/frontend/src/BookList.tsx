@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { readJsonFile } from "./files";
 import { loadProfile, saveProfile } from "./profilePref";
-import { btn, btnAccent, input } from "./ui";
+import { btn, input } from "./ui";
 import type { BookSummary, LibraryEntry } from "./types";
 
 //the profile a card will open at: the remembered choice if it still exists, else the first profile
@@ -32,12 +32,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
   const [books, setBooks] = useState<BookSummary[] | null>(null);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [attachFor, setAttachFor] = useState<string | null>(null); //external book_id being attached
-  const [editing, setEditing] = useState<string | null>(null);  //book_id whose series is being edited
-  const [name, setName] = useState("");
-  const [pos, setPos] = useState("");
   const [error, setError] = useState("");
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [hint, setHint] = useState<{ series: string; before: string | null } | null>(null);
   const [picked, setPicked] = useState<Record<string, string>>({}); //book_id -> profile_id to open at
 
   //open a book at the chosen profile (remembering it so BookView lands there)
@@ -65,49 +60,6 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
     const t = setInterval(tick, 5000); //pick up newly-synced books + library updates
     return () => { alive = false; clearInterval(t); };
   }, []);
-
-  const patchMeta = (bookId: string, series: string, series_index: number) =>
-    api(`/api/books/${encodeURIComponent(bookId)}/meta`, { method: "PATCH", body: JSON.stringify({ series, series_index }) });
-
-  //the next free position in a series (one past the highest existing one), device books only
-  const nextIndex = (series: string, excludeId?: string) =>
-    (books || []).filter((b) => !isExternal(b) && (b.series || "") === series && b.book_id !== excludeId)
-      .reduce((m, b) => Math.max(m, b.series_index ?? 0), -1) + 1;
-
-  async function saveSeries(bookId: string) {
-    setError("");
-    const s = name.trim();
-    const idx = pos.trim() ? Math.max(0, (parseInt(pos, 10) || 1) - 1) : nextIndex(s, bookId);
-    try { await patchMeta(bookId, s, idx); setEditing(null); await load(); }
-    catch (e) { setError((e as Error).message || "couldn't save — is the server up to date?"); }
-  }
-
-  //handle a drop. joining a new series appends at the next free number, dropping within the same
-  //series reorders around `beforeId` and renumbers that series contiguously.
-  async function moveBook(toSeries: string, beforeId: string | null) {
-    setHint(null);
-    const id = dragId; setDragId(null);
-    if (!id || !books) return;
-    const drag = books.find((b) => b.book_id === id);
-    if (!drag) return;
-    try {
-      if ((drag.series || "") !== toSeries) {
-        await patchMeta(id, toSeries, nextIndex(toSeries, id));
-      } else {
-        const ordered = books.filter((b) => !isExternal(b) && (b.series || "") === toSeries && b.book_id !== id).sort(byOrder);
-        let at = ordered.length;
-        if (beforeId) { const i = ordered.findIndex((b) => b.book_id === beforeId); if (i >= 0) at = i; }
-        ordered.splice(at, 0, drag);
-        const patches = ordered
-          .map((b, idx) => ({ b, idx }))
-          .filter(({ b, idx }) => (b.series_index ?? 0) !== idx)
-          .map(({ b, idx }) => patchMeta(b.book_id, toSeries, idx));
-        if (!patches.length) return;
-        await Promise.all(patches);
-      }
-      await load();
-    } catch (e) { setError((e as Error).message); }
-  }
 
   //adopt a device-library book (no notes yet): server makes a doc for it, then we open it
   async function adopt(bookId: string) {
@@ -149,10 +101,11 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
 
   const externalBooks = books.filter(isExternal);
 
-  //one grid for every device book: those with contexts (real Book rows — draggable, seriesable) plus the
-  //device's other books from the read-history catalog (no notes yet, shown dimmed with "start contexts",
-  //hidden when the user turns them off in settings). library entries already exclude anything that has a
-  //Book row, so there are no duplicates.
+  //one grid for every device book: those with contexts (real Book rows) plus the device's other books from
+  //the read-history catalog (no notes yet, shown dimmed with "start contexts", hidden when the user turns
+  //them off in settings). series grouping is read-only here — it comes from each book's koreader metadata,
+  //so it's changed in koreader, not on the web. library entries already exclude anything that has a Book
+  //row, so there are no duplicates.
   type DeviceCard = BookSummary & { started: boolean };
   const startedBooks: DeviceCard[] = books.filter((b) => !isExternal(b)).map((b) => ({ ...b, started: true }));
   const libraryCards: DeviceCard[] = showUnstarted
@@ -178,9 +131,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
 
       <div className="flex items-baseline gap-2 mb-1">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-faint">Your books</h2>
-        <span className="text-xs text-ink-faint">drag a book onto a series, or between books to reorder</span>
       </div>
-      <datalist id="series-list">{named.map((s) => <option key={s} value={s} />)}</datalist>
 
       {deviceBooks.length === 0 && (
         <div className="rounded-xl border border-dashed border-line-strong bg-paper-card p-6 text-center mb-5">
@@ -191,79 +142,50 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
 
       {sections.map((series) => {
         const list = (groups.get(series) || []).slice().sort(cardOrder);
-        const isDropGroup = hint?.series === series && hint.before === null;
         return (
-          <div key={series || "_none"} className="mb-5"
-               onDragOver={(e) => { if (dragId) { e.preventDefault(); setHint({ series, before: null }); } }}
-               onDrop={(e) => { e.preventDefault(); void moveBook(series, null); }}>
+          <div key={series || "_none"} className="mb-5">
             <div className="flex items-center gap-2 mb-2">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
                 {series || "Not in a series"}
               </span>
               <span className="text-xs text-ink-faint tabular-nums">{list.length}</span>
             </div>
-            <div className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 items-start gap-2.5 rounded-xl transition ${isDropGroup ? "ring-2 ring-accent-ring/50 bg-accent-soft/40 p-1.5 -m-1.5" : ""}`}>
-              {list.map((b) => {
-                const dropBefore = b.started && hint?.series === series && hint.before === b.book_id;
-                return (
-                  <div key={b.book_id} draggable={b.started}
-                       onDragStart={(e) => { if (!b.started) return; setDragId(b.book_id); e.dataTransfer.effectAllowed = "move"; }}
-                       onDragEnd={() => { setDragId(null); setHint(null); }}
-                       onDragOver={(e) => { if (dragId && b.started) { e.preventDefault(); e.stopPropagation(); setHint({ series, before: b.book_id }); } }}
-                       onDrop={(e) => { if (!b.started) return; e.preventDefault(); e.stopPropagation(); void moveBook(series, b.book_id); }}
-                       className={`relative w-full rounded-xl border bg-paper-card p-3 shadow-card transition hover:shadow-pop hover:border-accent-ring ${
-                         b.started ? "cursor-grab active:cursor-grabbing" : "cursor-pointer opacity-65 hover:opacity-100"} ${
-                         dragId === b.book_id ? "opacity-40" : ""} ${dropBefore ? "border-accent" : "border-line"}`}>
-                    {dropBefore && <span className="absolute -left-1.5 top-2 bottom-2 w-1 rounded-full bg-accent" />}
-                    <button className="group flex w-full items-start gap-2.5 text-left"
-                            onClick={() => (b.started ? open(b) : adopt(b.book_id))}>
-                      <Cover src={b.cover} title={b.title} />
-                      <span className="min-w-0 flex-1">
-                        <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
-                        {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
-                      </span>
-                    </button>
-                    {b.started ? (
-                      <>
-                        {(b.profiles?.length ?? 0) >= 1 && (
-                          <label className="mt-2 block">
-                            <span className="block text-[10px] uppercase tracking-wide text-ink-faint mb-0.5">Profile</span>
-                            {profileDropdown(b)}
-                          </label>
-                        )}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 items-start gap-2.5">
+              {list.map((b) => (
+                <div key={b.book_id}
+                     className={`relative w-full rounded-xl border border-line bg-paper-card p-3 shadow-card transition hover:shadow-pop hover:border-accent-ring cursor-pointer ${
+                       b.started ? "" : "opacity-65 hover:opacity-100"}`}>
+                  <button className="group flex w-full items-start gap-2.5 text-left"
+                          onClick={() => (b.started ? open(b) : adopt(b.book_id))}>
+                    <Cover src={b.cover} title={b.title} />
+                    <span className="min-w-0 flex-1">
+                      <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
+                      {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
+                    </span>
+                  </button>
+                  {b.started ? (
+                    <>
+                      {(b.profiles?.length ?? 0) >= 1 && (
+                        <label className="mt-2 block">
+                          <span className="block text-[10px] uppercase tracking-wide text-ink-faint mb-0.5">Profile</span>
+                          {profileDropdown(b)}
+                        </label>
+                      )}
+                      {b.series && (
                         <div className="mt-2 pt-2 border-t border-line">
-                          {editing === b.book_id ? (
-                            <form onSubmit={(e) => { e.preventDefault(); void saveSeries(b.book_id); }}>
-                              <div className="flex gap-1.5 items-center">
-                                <input autoFocus list="series-list" className={`${input} flex-1 py-1 min-w-0`} placeholder="series name" value={name}
-                                       onChange={(e) => setName(e.target.value)}
-                                       onKeyDown={(e) => { if (e.key === "Escape") { setEditing(null); setError(""); } }} />
-                                <input type="number" min={1} className={`${input} w-14 py-1`} placeholder="#" value={pos}
-                                       onChange={(e) => setPos(e.target.value)} />
-                              </div>
-                              <div className="flex gap-1.5 mt-1.5">
-                                <button type="submit" className={`${btnAccent} py-1`}>Save</button>
-                                <button type="button" className={`${btn} py-1`} onClick={() => { setEditing(null); setError(""); }}>Cancel</button>
-                              </div>
-                            </form>
-                          ) : (
-                            <button className="text-xs text-ink-soft hover:text-accent-hover transition"
-                                    onClick={() => { setEditing(b.book_id); setName(b.series || ""); setPos(b.series ? String((b.series_index ?? 0) + 1) : ""); setError(""); }}>
-                              {b.series ? `${b.series} · #${(b.series_index ?? 0) + 1}` : "+ Add to a series"}
-                            </button>
-                          )}
+                          <span className="block text-xs text-ink-soft">{b.series} · #{(b.series_index ?? 0) + 1}</span>
                         </div>
-                      </>
-                    ) : (
-                      <div className="mt-2 pt-2 border-t border-line">
-                        <button className="text-xs font-medium text-accent-hover hover:underline transition"
-                                onClick={() => adopt(b.book_id)}>+ start contexts</button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {list.length === 0 && <div className="text-sm text-ink-faint px-1 py-3">drop a book here</div>}
+                      )}
+                    </>
+                  ) : (
+                    <div className="mt-2 pt-2 border-t border-line">
+                      <button className="text-xs font-medium text-accent-hover hover:underline transition"
+                              onClick={() => adopt(b.book_id)}>+ start contexts</button>
+                      {b.series && <span className="block text-xs text-ink-soft mt-1">{b.series} · #{(b.series_index ?? 0) + 1}</span>}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         );

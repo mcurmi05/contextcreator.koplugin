@@ -84,12 +84,16 @@ export default function ProfilePicker({ profiles, activeId, onSwitch, onCreate, 
                   </button>
                   <button className="shrink-0 text-ink-faint hover:text-ink transition text-xs px-1 opacity-0 group-hover:opacity-100"
                           title="Rename" onClick={() => { setRenaming(p.profile_id); setRenameText(p.name); }}>✎</button>
-                  {profiles.length > 1 && (
-                    <button className="group/trash shrink-0 p-1 opacity-0 group-hover:opacity-100" title="Delete profile"
-                            onClick={() => { if (confirm(`Delete profile "${p.name}"? Its notes can't be recovered.`)) onDelete(p.profile_id); }}>
-                      <TrashImg className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  <button className="group/trash shrink-0 p-1 opacity-0 group-hover:opacity-100" title="Delete profile"
+                          onClick={() => {
+                            //deleting the only profile removes the book itself (reverts a device book to "start contexts")
+                            const msg = profiles.length === 1
+                              ? `Delete profile "${p.name}"? It's the only one, so this removes the book from your web contexts. Its notes can't be recovered.`
+                              : `Delete profile "${p.name}"? Its notes can't be recovered.`;
+                            if (confirm(msg)) onDelete(p.profile_id);
+                          }}>
+                    <TrashImg className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               );
             })}

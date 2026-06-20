@@ -201,7 +201,7 @@ function ContextSync:buildLibrary()
                     local title = props.display_title or props.title
                     if not title or title == "" then
                         local _p, name = util.splitFilePathName(file)
-                        title = name
+                        title = (name or ""):gsub("%.%w+$", "")  --drop the extension for a cleaner placeholder
                     end
                     out[#out + 1] = { book_id = md5, title = title or "", authors = props.authors or props.author or "",
                                       series = props.series or "", series_index = webSeriesIndex(props.series_index), file = file }
@@ -336,7 +336,7 @@ function ContextSync:buildLibraryAll()
         --without the user having to open the book first.
         if not title or title == "" then
             local _p, name = util.splitFilePathName(path)
-            title = name
+            title = (name or ""):gsub("%.%w+$", "")  --drop the extension for a cleaner placeholder until the real title is read
         end
         out[#out + 1] = { book_id = md5, title = title or "", authors = authors or "",
                           series = series or "", series_index = webSeriesIndex(series_index), file = path }

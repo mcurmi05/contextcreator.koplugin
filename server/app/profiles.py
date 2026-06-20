@@ -153,6 +153,7 @@ def compose(book, profile):
     if toc:
         meta["toc"] = toc
     doc["book"] = meta
+    doc["source"] = book.source  #"device" or "external", so the web knows whether a missing timeline can be fixed by syncing koreader
     doc["reading_progress"] = book.reading_progress
     #advertise which profile this is so the client can label its picker
     doc["profile"] = {"id": profile.profile_id, "name": profile.name}

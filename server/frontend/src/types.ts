@@ -36,6 +36,7 @@ export interface NodePos { x: number; y: number; }
 export interface Doc {
   schema?: number;
   book?: BookMeta;
+  source?: string;                     //"device" (syncs to koreader) or "external" (web-only imported doc)
   updated?: number;
   contexts: Record<string, Context>;
   relationships?: Relationship[];

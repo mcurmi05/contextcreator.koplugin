@@ -5,7 +5,9 @@ import Browse from "./Browse";
 import Timeline from "./Timeline";
 import DetailPanel from "./DetailPanel";
 import ProfilePicker from "./ProfilePicker";
-import { btn } from "./ui";
+import Modal from "./Modal";
+import { btn, btnAccent, input } from "./ui";
+import { TYPE_LABELS } from "./model";
 import { loadTypeColors, saveTypeColors } from "./typeColors";
 import { downloadJson, readJsonFile, slug } from "./files";
 import * as dq from "./docops";
@@ -30,6 +32,9 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   const [devicesLoaded, setDevicesLoaded] = useState(false);
   const lastUpdated = useRef<number | undefined>(undefined);
   const didAutoScrub = useRef<string | null>(null); //bookId we've already jumped-to-current for
+  //styled add dialogs for the graph view (in place of window.prompt)
+  const [addCtx, setAddCtx] = useState<{ name: string; type: string } | null>(null);
+  const [addRel, setAddRel] = useState<{ from: string; to: string; label: string; directed: boolean } | null>(null);
 
   //every notes call is scoped to the active profile via ?profile=
   const bookUrl = useCallback(
@@ -125,11 +130,13 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   //new contexts/points are anchored to where the timeline is scrubbed to right now, so they show up at
   //that spot in the story (matching how the device anchors to the reading position)
   async function addContext(title: string, type: string) {
+    if (!doc?.book?.toc?.length) return;  //no timeline yet -> nowhere to anchor it, so block the add
     await edit(() => api(bookUrl("/contexts"), {
       method: "POST", body: JSON.stringify({ title, type, progress: scrub }),
     }).then(() => {}));
   }
   async function addPoint(key: string, text: string) {
+    if (!doc?.book?.toc?.length) return;  //no timeline yet -> nowhere to anchor it, so block the add
     await edit(() => api(bookUrl(`/contexts/${encodeURIComponent(key)}/points`), {
       method: "POST", body: JSON.stringify({ text, progress: scrub }),
     }).then(() => {}));
@@ -238,9 +245,13 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
     await loadProfiles();
   }
   async function deleteProfile(id: string) {
+    let res: { book_removed?: boolean };
     try {
-      await api(`/api/books/${encodeURIComponent(bookId)}/profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+      res = await api<{ book_removed?: boolean }>(`/api/books/${encodeURIComponent(bookId)}/profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
     } catch (e) { alert((e as Error).message); return; }
+    //deleting the last profile removes the book entirely — go back to the list, where a device book now
+    //shows "start contexts" again
+    if (res?.book_removed) { onBack(); return; }
     const rest = profiles.filter((p) => p.profile_id !== id);
     await loadProfiles();
     if (id === profile) switchProfile(rest[0]?.profile_id || "default");
@@ -264,6 +275,16 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
 
   const n = Object.keys(doc.contexts || {}).length;
   const rels = (doc.relationships || []).length;
+  //the timeline needs the book's chapter list, which only the device produces (when the book is opened in
+  //koreader). without it there's nowhere to anchor dot points, so for a device book we prompt the user to
+  //open + sync first rather than letting them place notes against an empty timeline. external (web-only
+  //imported) books can't be synced from koreader, so we don't nag about those.
+  const hasTimeline = (doc.book?.toc || []).length > 0;
+  const canSyncTimeline = doc.source !== "external";
+  //contexts as relationship endpoints (for the "Add relationship" modal), by title
+  const ctxList = Object.keys(doc.contexts || {})
+    .map((k) => ({ k, title: doc.contexts[k]?.title || k }))
+    .sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()));
 
   return (
     <div className="h-full flex flex-col px-5 py-4 gap-3">
@@ -301,7 +322,19 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
       </div>
 
       <div className="shrink-0">
-        <Timeline doc={doc} devices={devices} scrub={scrub} onScrub={setScrub} />
+        {hasTimeline || !canSyncTimeline ? (
+          <Timeline doc={doc} devices={devices} scrub={scrub} onScrub={setScrub}
+                    onAddContext={tab === "graph" && hasTimeline ? () => setAddCtx({ name: "", type: "unset" }) : undefined}
+                    onAddRelationship={tab === "graph" && hasTimeline && Object.keys(doc.contexts || {}).length >= 2
+                      ? () => setAddRel({ from: "", to: "", label: "", directed: true }) : undefined} />
+        ) : (
+          <div className="rounded-xl border border-dashed border-line-strong bg-paper-card px-4 py-3">
+            <strong className="block text-sm">This book has no timeline yet</strong>
+            <p className="text-sm text-ink-faint mt-0.5">
+              Open it in KOReader and let it sync so the chapters and your reading position can load in.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* main work area fills the rest of the viewport */}
@@ -315,7 +348,8 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
           <div className="h-full flex gap-3 items-start overflow-hidden">
             <div className="flex-1 min-w-0 h-full overflow-auto pr-1">
               <Browse doc={doc} scrub={scrub} selected={selected} onSelect={setSelected}
-                      hiddenTypes={hiddenTypes} typeColors={typeColors} onAddContext={addContext} />
+                      hiddenTypes={hiddenTypes} typeColors={typeColors} onAddContext={addContext}
+                      onAddRelationship={ops.createLink} canAdd={hasTimeline} />
             </div>
             <div className="w-[300px] shrink-0 h-full overflow-auto">
               <DetailPanel doc={doc} selected={selected} scrub={scrub} typeColors={typeColors} onAddPoint={addPoint} onEditPoint={editPoint} onClose={() => setSelected(null)} />
@@ -323,6 +357,54 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
           </div>
         )}
       </div>
+
+      {/* styled "add" dialogs for the graph view (replacing window.prompt) */}
+      {addCtx && (
+        <Modal title="New context" onClose={() => setAddCtx(null)}>
+          <form onSubmit={(e) => { e.preventDefault(); const t = addCtx.name.trim(); if (!t) return; void addContext(t, addCtx.type); setAddCtx(null); }}>
+            <input autoFocus className={`${input} w-full`} placeholder="context name" value={addCtx.name}
+                   onChange={(e) => setAddCtx({ ...addCtx, name: e.target.value })} />
+            <select className={`${input} w-full mt-2`} value={addCtx.type} onChange={(e) => setAddCtx({ ...addCtx, type: e.target.value })}>
+              <option value="unset">No type</option>
+              {["character", "place", "object", "concept"].map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+            </select>
+            <p className="text-xs text-ink-faint mt-2">Added at the current timeline position ({Math.round(scrub * 100)}%).</p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" className={btn} onClick={() => setAddCtx(null)}>Cancel</button>
+              <button type="submit" className={btnAccent} disabled={!addCtx.name.trim()}>Add context</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {addRel && (
+        <Modal title="New relationship" onClose={() => setAddRel(null)}>
+          <form onSubmit={(e) => { e.preventDefault(); if (!addRel.from || !addRel.to || addRel.from === addRel.to) return; ops.createLink(addRel.from, addRel.to, addRel.label.trim(), addRel.directed); setAddRel(null); }}>
+            <div className="flex items-center gap-2">
+              <select className={`${input} flex-1 min-w-0`} value={addRel.from} onChange={(e) => setAddRel({ ...addRel, from: e.target.value })}>
+                <option value="">from…</option>
+                {ctxList.map((o) => <option key={o.k} value={o.k}>{o.title}</option>)}
+              </select>
+              <span className="text-ink-faint select-none">{addRel.directed ? "→" : "—"}</span>
+              <select className={`${input} flex-1 min-w-0`} value={addRel.to} onChange={(e) => setAddRel({ ...addRel, to: e.target.value })}>
+                <option value="">to…</option>
+                {ctxList.map((o) => <option key={o.k} value={o.k}>{o.title}</option>)}
+              </select>
+            </div>
+            <input className={`${input} w-full mt-2`} placeholder="label (optional)" value={addRel.label}
+                   onChange={(e) => setAddRel({ ...addRel, label: e.target.value })} />
+            <label className="flex items-center gap-1.5 text-sm text-ink-soft cursor-pointer mt-2 select-none">
+              <input type="checkbox" className="h-4 w-4 accent-accent cursor-pointer" checked={addRel.directed}
+                     onChange={(e) => setAddRel({ ...addRel, directed: e.target.checked })} />
+              directed
+            </label>
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" className={btn} onClick={() => setAddRel(null)}>Cancel</button>
+              <button type="submit" className={btnAccent} disabled={!addRel.from || !addRel.to || addRel.from === addRel.to}>Add relationship</button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }

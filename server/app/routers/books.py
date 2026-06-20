@@ -34,11 +34,6 @@ class PointEdit(BaseModel):
     index: int | None = None
 
 
-class BookMetaIn(BaseModel):
-    series: str | None = None
-    series_index: int | None = None
-
-
 class ProfileIn(BaseModel):
     name: str
     copy_from: str | None = None  #profile_id to duplicate notes from (else a blank profile)
@@ -119,12 +114,17 @@ def rename_profile(book_id: str, profile_id: str, body: ProfileRename, user: Use
 @router.delete("/books/{book_id}/profiles/{profile_id}")
 def delete_profile(book_id: str, profile_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     rows = profiles.list_profiles(session, user.id, book_id)
-    if len(rows) <= 1:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="a book must keep at least one profile")
     prof = _get_profile(session, user, book_id, profile_id)
     session.delete(prof)
+    #if that was the last profile, drop the Book itself. for a device book its library catalog entry
+    #resurfaces so it shows "start contexts" again; an imported book is simply removed.
+    book_removed = not [r for r in rows if r.profile_id != profile_id]
+    if book_removed:
+        book = session.exec(select(Book).where(Book.user_id == user.id, Book.book_id == book_id)).first()
+        if book:
+            session.delete(book)
     session.commit()
-    return {"deleted": profile_id}
+    return {"deleted": profile_id, "book_removed": book_removed}
 
 
 @router.post("/books/{book_id}/profiles/{profile_id}/to-external")
@@ -243,18 +243,6 @@ def import_all(body: dict, user: User = Depends(get_current_user), session: Sess
         count += 1
     session.commit()
     return {"imported": count}
-
-
-@router.patch("/books/{book_id}/meta")
-def set_book_meta(book_id: str, body: BookMetaIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    #set web-only book metadata (currently just the series grouping label)
-    row = _get_row(session, user, book_id)
-    if body.series is not None:
-        row.series = body.series.strip()
-    if body.series_index is not None:
-        row.series_index = body.series_index
-    session.commit()
-    return {"book_id": row.book_id, "series": row.series, "series_index": row.series_index}
 
 
 @router.post("/books/{book_id}/import")
