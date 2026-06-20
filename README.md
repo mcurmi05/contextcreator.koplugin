@@ -96,3 +96,6 @@ Enabling a per book graph of your contexts and the links between them, nodes col
 - **Accounts**: first run setup, session login, per user data isolation. The first account is the admin and can add more users, each with their own books.
 - **Books screen**: group books into a series by dragging, reorder them, set a series index.
 - **Settings**: accent and timeline colours, a custom logo and title, all the graph layout options above, and import/export. Everything you customise is saved and travels with an exported appearance config, so you can share your exact setup. You can also export/import all your contexts, or a single book's.
+
+The example json in the graph view:
+<img width="1915" height="926" alt="image" src="https://github.com/user-attachments/assets/02419953-20d7-4343-a181-05186cd6ab02" />
