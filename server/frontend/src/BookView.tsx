@@ -11,7 +11,7 @@ import { downloadJson, readJsonFile, slug } from "./files";
 import * as dq from "./docops";
 import { loadProfile, saveProfile } from "./profilePref";
 import type { GraphPrefs } from "./theme";
-import type { Doc, GraphEditOps, ProfileSummary, Selected } from "./types";
+import type { DevicePosition, Doc, GraphEditOps, ProfileSummary, Selected } from "./types";
 
 export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   bookId: string; onBack: () => void; graph: GraphPrefs; onGraphChange: (g: GraphPrefs) => void;
@@ -26,7 +26,10 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   const [redoStack, setRedoStack] = useState<Doc[]>([]);
   const [profile, setProfile] = useState<string>(() => loadProfile(bookId));
   const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
+  const [devices, setDevices] = useState<DevicePosition[]>([]);
+  const [devicesLoaded, setDevicesLoaded] = useState(false);
   const lastUpdated = useRef<number | undefined>(undefined);
+  const didAutoScrub = useRef<string | null>(null); //bookId we've already jumped-to-current for
 
   //every notes call is scoped to the active profile via ?profile=
   const bookUrl = useCallback(
@@ -40,6 +43,32 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
     catch { /* ignore */ }
   }, [bookId]);
   useEffect(() => { void loadProfiles(); }, [loadProfiles]);
+
+  //per-device reading positions for the timeline's "jump to current" (book-level, not profile-scoped).
+  //polled so a device that just synced shows up without a refresh.
+  const loadDevices = useCallback(async () => {
+    try { setDevices(await api<DevicePosition[]>(`/api/books/${encodeURIComponent(bookId)}/devices`)); }
+    catch { /* ignore */ }
+    finally { setDevicesLoaded(true); }
+  }, [bookId]);
+  useEffect(() => {
+    setDevicesLoaded(false);
+    void loadDevices();
+    const t = setInterval(() => { void loadDevices(); }, 8000);
+    return () => clearInterval(t);
+  }, [loadDevices]);
+
+  //open the timeline jumped to where the reader is up to (freshest device, else the shared position),
+  //not at the very end. runs once per book once both the doc and the device list have loaded; after that
+  //the user is free to scrub anywhere without it snapping back.
+  useEffect(() => {
+    if (!doc || !devicesLoaded || didAutoScrub.current === bookId) return;
+    didAutoScrub.current = bookId;
+    const dev = devices.find((d) => typeof d.reading_progress === "number");
+    const rp = dev ? dev.reading_progress
+      : (typeof doc.reading_progress === "number" ? doc.reading_progress : null);
+    if (rp != null) setScrub(Math.max(0, Math.min(1, rp)));
+  }, [doc, devices, devicesLoaded, bookId]);
 
   const reload = useCallback(async () => {
     const d = await api<Doc>(bookUrl());
@@ -272,7 +301,7 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
       </div>
 
       <div className="shrink-0">
-        <Timeline doc={doc} scrub={scrub} onScrub={setScrub} />
+        <Timeline doc={doc} devices={devices} scrub={scrub} onScrub={setScrub} />
       </div>
 
       {/* main work area fills the rest of the viewport */}

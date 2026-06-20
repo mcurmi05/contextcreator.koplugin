@@ -47,6 +47,19 @@ class Profile(SQLModel, table=True):
     updated: int = 0
     created: datetime = Field(default_factory=_now)
 
+#where each koreader device has read up to in a book. the shared Book.reading_progress is last-write-wins
+#across devices, so this keeps a per-device position too: the web "jump to current" can then offer every
+#device's spot, not just whichever synced last. keyed by a stable device id the plugin mints once.
+class DevicePosition(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "book_id", "device_id", name="uq_user_book_device"),)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    book_id: str = Field(index=True)
+    device_id: str = Field(index=True)   #stable token the device generates once and reuses
+    device_name: str = ""                #friendly label (koreader model by default)
+    reading_progress: float = 0.0        #0..1 fraction this device last read up to
+    updated: int = 0                     #unix seconds of the last sync from this device
+
 #a book known to be on the koreader device (from its read history) that may not have a contexts doc yet.
 #lets the web ui offer "start a context for a book you haven't taken notes on".
 class LibraryEntry(SQLModel, table=True):

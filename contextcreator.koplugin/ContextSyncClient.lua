@@ -19,8 +19,15 @@ local ContextSyncClient = {}
 ContextSyncClient.__index = ContextSyncClient
 
 function ContextSyncClient:new(server, username, password)
+    --normalize the server url: drop surrounding whitespace + trailing slashes, and default a missing
+    --scheme to http://. without a scheme koreader's url parser mistakes the host for the scheme, which
+    --crashes deep in socket.http (SCHEMES lookup), so guard against a bare "host:port" being entered.
+    server = (server or ""):gsub("%s+", "")
+    if server ~= "" and not server:match("^https?://") then
+        server = "http://" .. server
+    end
     return setmetatable({
-        server = (server or ""):gsub("/+$", ""),
+        server = server:gsub("/+$", ""),
         auth = "Basic " .. mime.b64((username or "") .. ":" .. (password or "")),
     }, ContextSyncClient)
 end
@@ -48,15 +55,21 @@ function ContextSyncClient:request(method, path, body)
     end
 
     socketutil:set_timeout(BLOCK_TIMEOUT, TOTAL_TIMEOUT)
-    local _, code = requester.request{
+    --pcall the request so a bad url, tls handshake failure or other socket error returns a graceful
+    --failure instead of bubbling up an error that crashes the whole reader. reset the timeout either way.
+    local ok, _, code = pcall(requester.request, {
         url = url,
         method = method,
         headers = headers,
         source = source,
         sink = ltn12.sink.table(sink),
-    }
+    })
     socketutil:reset_timeout()
 
+    if not ok then
+        logger.warn("ContextCreator sync:", method, path, "request error:", tostring(_))
+        return false, "request error"
+    end
     if type(code) ~= "number" or code < 200 or code >= 300 then
         logger.warn("ContextCreator sync:", method, path, "->", tostring(code))
         return false, code
@@ -78,9 +91,15 @@ end
 
 --push the device's whole doc for one profile; server merges and returns the merged doc to adopt locally.
 --name (optional) registers/updates the profile's display name server-side (used when it's brand new).
-function ContextSyncClient:pushBook(book_id, doc, profile, name)
+--device (optional) is { id, name } so the server can track this device's reading position separately,
+--letting the web "jump to current" offer every connected device's spot.
+function ContextSyncClient:pushBook(book_id, doc, profile, name, device)
     local q = "?profile=" .. urlencode(profile or "default")
     if name and name ~= "" then q = q .. "&name=" .. urlencode(name) end
+    if device and device.id and device.id ~= "" then
+        q = q .. "&device_id=" .. urlencode(device.id)
+        if device.name and device.name ~= "" then q = q .. "&device_name=" .. urlencode(device.name) end
+    end
     return self:request("POST", "/api/sync/books/" .. book_id .. q, doc)
 end
 

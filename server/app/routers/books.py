@@ -149,6 +149,16 @@ def profile_to_external(book_id: str, profile_id: str, user: User = Depends(get_
     return {"book_id": target_id, "profile_id": pid, "title": base}
 
 
+@router.get("/books/{book_id}/devices")
+def list_book_devices(book_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #where each koreader device has read up to, so the timeline's "jump to current" can offer every
+    #device's spot (not just whichever synced last). freshest device first.
+    _get_row(session, user, book_id)
+    rows = profiles.list_device_positions(session, user.id, book_id)
+    return [{"device_id": r.device_id, "device_name": r.device_name,
+             "reading_progress": r.reading_progress, "updated": r.updated} for r in rows]
+
+
 @router.get("/books/{book_id}")
 def get_book(book_id: str, profile: str = DEFAULT_PID, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     #the full composed document for one profile, so the web ui can show what's been synced

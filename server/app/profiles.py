@@ -8,10 +8,40 @@ import secrets
 from sqlmodel import select
 
 from . import docops
-from .models import Book, Profile
+from .models import Book, DevicePosition, Profile
 from .sync import _normalize, merge, new_doc
 
 DEFAULT_PID = "default"
+
+
+def record_device_position(session, user_id, book_id, device_id, reading_progress, *, device_name=None):
+    #remember where one device has read up to, so the web can offer a per-device "jump to current".
+    #upsert by (user, book, device); ignored when there's no usable position or no device id.
+    if not device_id or not isinstance(reading_progress, (int, float)) or isinstance(reading_progress, bool):
+        return
+    rp = max(0.0, min(1.0, float(reading_progress)))
+    row = session.exec(
+        select(DevicePosition).where(
+            DevicePosition.user_id == user_id, DevicePosition.book_id == book_id,
+            DevicePosition.device_id == device_id,
+        )
+    ).first()
+    if row is None:
+        row = DevicePosition(user_id=user_id, book_id=book_id, device_id=device_id)
+        session.add(row)
+    row.reading_progress = rp
+    row.updated = docops.now()
+    if device_name and device_name.strip():
+        row.device_name = device_name.strip()
+
+
+def list_device_positions(session, user_id, book_id):
+    #every device's last-read spot for a book, freshest first (so the most recently active device leads)
+    return session.exec(
+        select(DevicePosition).where(
+            DevicePosition.user_id == user_id, DevicePosition.book_id == book_id,
+        ).order_by(DevicePosition.updated.desc())
+    ).all()
 
 
 def _book(session, user_id, book_id):

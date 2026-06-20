@@ -48,6 +48,9 @@ export interface Doc {
 //a named context document within a book (alternate note-set)
 export interface ProfileSummary { profile_id: string; name: string; updated?: number; }
 
+//where one koreader device has read up to, so "jump to current" can offer each device's spot
+export interface DevicePosition { device_id: string; device_name: string; reading_progress: number; updated: number; }
+
 //locate a dot point for editing/deletion: by stable id when it has one, else by list index
 export interface PointRef { id?: string; index: number }
 

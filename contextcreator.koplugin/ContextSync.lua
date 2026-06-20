@@ -38,6 +38,26 @@ function ContextSync:saveSettings(s)
     G_reader_settings:saveSetting("contextcreator_sync", s)
 end
 
+--a stable id + friendly name for this device, so the web's "jump to current" can tell devices apart.
+--the id is minted once and persisted in our sync settings; the name defaults to the koreader model.
+function ContextSync:deviceInfo()
+    local s = self:settings()
+    if not s.device_id or s.device_id == "" then
+        --build the id from 16-bit chunks: %04x on a value < 65536 is safe on every lua build, whereas
+        --formatting a full 32-bit random with %x crashes LuaJIT (kobo) for values past 2^31.
+        math.randomseed(os.time() + math.floor((os.clock() or 0) * 1000))
+        local function chunk() return string.format("%04x", math.random(0, 0xffff)) end
+        s.device_id = "dev-" .. chunk() .. chunk() .. chunk() .. chunk()
+        self:saveSettings(s)
+    end
+    local name = s.device_name
+    if not name or name == "" then
+        local ok, Device = pcall(require, "device")
+        name = (ok and Device and Device.model) or "KOReader"
+    end
+    return { id = s.device_id, name = name }
+end
+
 function ContextSync:isConfigured()
     local s = self:settings()
     return s.enabled == true and s.server and s.server ~= ""
@@ -114,9 +134,10 @@ function ContextSync:syncNow(interactive)
     local doc = self.store:load()
     local progress = self.store:describeLocator(nil).progress
     if progress then doc.reading_progress = progress end
-    --push the active profile, passing its name so a freshly created one registers server-side
+    --push the active profile, passing its name so a freshly created one registers server-side, and this
+    --device's id/name so the server records its reading position separately from other devices'
     local profile = self.store:getProfileId()
-    local ok, merged = client:pushBook(book_id, doc, profile, self.store:getProfileName(profile))
+    local ok, merged = client:pushBook(book_id, doc, profile, self.store:getProfileName(profile), self:deviceInfo())
     if ok and type(merged) == "table" and merged.contexts then
         self.store:replace(merged) -- adopt the merged result without re-triggering a sync
         if interactive then
