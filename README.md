@@ -1,4 +1,4 @@
-# Koreader-Context-Creator
+# Koreader Context Creator
 
 A KOReader plugin and an optional self hosted sync server and web app for building up context about the characters, places, objects and concepts in a book as you read. Highlight a name, write dot points about it, link things together, and slowly build a cool visual map.
 
