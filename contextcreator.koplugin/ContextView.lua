@@ -23,8 +23,10 @@ local ContextSchema = require("ContextSchema")
 --bullet shown in front of each dot point in the list view
 local BULLET = "\u{2022} "
 
---margin kept around the context windows so the book stays visible behind them
-local WINDOW_MARGIN = Screen:scaleBySize(80)
+--margin kept around the context windows so the book stays visible behind them.
+--cap it at a fraction of the screen width so narrow devices (small Kobos) keep a window
+--wide enough for the footer buttons (back / relationships / add) instead of clipping them.
+local WINDOW_MARGIN = math.min(Screen:scaleBySize(80), math.floor(Screen:getWidth() / 20))
 
 --glyph between the two ends of a relationship, a one way arrow when directed, a two way one when not.
 --missing directed field means it was made before undirected existed, treat those as directed
@@ -437,7 +439,7 @@ end
 
 --show the dot points for a node as a list. tap to add/edit, long-press to delete.
 --the title carries the node's type (when set) so it stays visible while reading the points.
-function ContextView:showPointsList(key)
+function ContextView:showPointsList(key, reveal_all)
     local doc = self.store:load()
     local node = doc.contexts[key]
     if not node then return end
@@ -445,15 +447,20 @@ function ContextView:showPointsList(key)
 
     --by default hide dot points noted beyond the current reading position, so the notes don't spoil
     --what's ahead. the choice is the same persisted setting used by the all-contexts filter.
+    --reveal_all is a one-off override (tapping the "hidden" notice); it isn't persisted, so
+    --reopening this list later goes back to hiding the later notes.
     local progress = self.store:describeLocator(nil).progress
-    local only_read = self:getOnlyRead() and progress ~= nil
+    local hiding = self:getOnlyRead() and progress ~= nil --the setting wants later notes hidden
+    local only_read = hiding and not reveal_all --reveal_all overrides it for this viewing
 
     local items = {}
-    local hidden = 0
+    local later = 0 --notes beyond the reading position that the setting would hide
     for i, point in ipairs(points) do
         local pp = pointProgress(point)
-        if only_read and pp and pp > progress + 1e-6 then
-            hidden = hidden + 1 --noted ahead of where we are, keep it out of sight (index i still maps in node.points)
+        local beyond = hiding and pp and pp > progress + 1e-6
+        if beyond then later = later + 1 end
+        if only_read and beyond then
+            --noted ahead of where we are, keep it out of sight (index i still maps in node.points)
         else
             --dot points are about what you're learning, not bookmarks, so no page shown here.
             --the location is still stored (long-press a point -> "Go to location" to jump there).
@@ -463,11 +470,18 @@ function ContextView:showPointsList(key)
             })
         end
     end
-    if hidden > 0 then
-        table.insert(items, {
-            text = T(_("\u{2026} %1 later note(s) hidden \u{00B7} up to %2%"), hidden, math.floor(progress * 100 + 0.5)),
-            _info = true, --not a real point, just a notice
-        })
+    if later > 0 then
+        if reveal_all then --currently showing the later notes: offer to hide them again
+            table.insert(items, {
+                text = T(_("\u{2026} showing %1 later note(s) \u{00B7} tap to hide"), later),
+                _rehide = true,
+            })
+        else --notes hidden: tap to reveal them for this viewing only
+            table.insert(items, {
+                text = T(_("\u{2026} %1 later note(s) hidden \u{00B7} up to %2% \u{00B7} tap to show"), later, math.floor(progress * 100 + 0.5)),
+                _reveal = true,
+            })
+        end
     end
 
     local label = ContextSchema.typeLabel(node.type)
@@ -482,12 +496,16 @@ function ContextView:showPointsList(key)
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false, --keep the border but drop Menus rounded corners
         onMenuSelect = function(_self, item)
-            if item._info then return end --the "later notes hidden" notice isn't tappable
+            if item._reveal or item._rehide then --flip whether the later notes show, just for this viewing
+                UIManager:close(menu)
+                self:showPointsList(key, item._reveal == true)
+                return
+            end
             UIManager:close(menu)
             self:editPoint(key, node.title, item._index)
         end,
         onMenuHold = function(_self, item)
-            if item._info then return true end
+            if item._reveal or item._rehide then return true end
             self:showPointActions(menu, key, item._index)
             return true
         end,
@@ -1180,19 +1198,28 @@ function ContextView:showRelationships(key, parent_menu)
         end,
         close_callback = function() UIManager:close(menu) end,
     }
+
+    --back to where this list opened from: the all-contexts page for the book-wide list,
+    --or the context's own points list when scoped to one context
+    self:addFooterButton(menu, "left", _("\u{2190}"), function()
+        UIManager:close(menu)
+        if key then self:showPointsList(key) else self:showAllContexts() end
+    end)
+
     UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
 end
 
 --a single relationship: its dot points, with footer buttons to rename the link or add a point.
 --tap a point to edit it, long-press to delete it (mirrors the node points list).
-function ContextView:showRelationshipView(rel_id)
+function ContextView:showRelationshipView(rel_id, reveal_all)
     local doc = self.store:load()
     local rel = ContextSchema.findRel(doc, rel_id)
     if not rel then return end
 
-    --like the context points list, hide link notes from beyond the current reading position by default
+    --like the context points list, hide link notes from beyond the current reading position by default.
+    --reveal_all is a one-off override (tapping the "hidden" notice) and isn't persisted.
     local progress = self.store:describeLocator(nil).progress
-    local only_read = self:getOnlyRead() and progress ~= nil
+    local only_read = self:getOnlyRead() and progress ~= nil and not reveal_all
 
     local items = {}
     local hidden = 0
@@ -1209,8 +1236,8 @@ function ContextView:showRelationshipView(rel_id)
     end
     if hidden > 0 then
         table.insert(items, {
-            text = T(_("\u{2026} %1 later note(s) hidden \u{00B7} up to %2%"), hidden, math.floor(progress * 100 + 0.5)),
-            _info = true,
+            text = T(_("\u{2026} %1 later note(s) hidden \u{00B7} up to %2% \u{00B7} tap to show"), hidden, math.floor(progress * 100 + 0.5)),
+            _reveal = true,
         })
     end
 
@@ -1222,12 +1249,16 @@ function ContextView:showRelationshipView(rel_id)
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false,
         onMenuSelect = function(_self, item)
-            if item._info then return end
+            if item._reveal then --reveal the later notes, just for this viewing
+                UIManager:close(menu)
+                self:showRelationshipView(rel_id, true)
+                return
+            end
             UIManager:close(menu)
             self:editRelPoint(rel_id, item._index)
         end,
         onMenuHold = function(_self, item)
-            if item._info then return true end
+            if item._reveal then return true end
             self:showRelPointActions(menu, rel_id, item._index)
             return true
         end,
