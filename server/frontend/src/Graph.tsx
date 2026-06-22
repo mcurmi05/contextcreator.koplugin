@@ -552,8 +552,12 @@ export default function Graph({ doc, scrub, onScrub, selected, onSelect, hiddenT
   const hits: Hit[] = [];
   if (q) {
     for (const k in contexts) {
-      const title = contexts[k].title || k;
-      if (title.toLowerCase().includes(q)) hits.push({ key: k, title, kind: "context" });
+      const c = contexts[k];
+      const title = c.title || k;
+      if (title.toLowerCase().includes(q)) { hits.push({ key: k, title, kind: "context" }); continue; }
+      //a context also matches via any of its aliases; note which alias matched in the snippet
+      const alias = (c.aliases || []).find((a) => a.toLowerCase().includes(q));
+      if (alias) hits.push({ key: k, title, kind: "context", snippet: `alias: ${alias}` });
     }
     for (const k in contexts) {
       for (const p of contexts[k].points || []) {
@@ -604,7 +608,7 @@ export default function Graph({ doc, scrub, onScrub, selected, onSelect, hiddenT
                         style={{ background: colorFor(contexts[h.key]?.type, typeColors) }} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm truncate">{h.title}</span>
-                    {h.kind === "point" && <span className="block text-xs text-ink-faint truncate">{h.snippet}</span>}
+                    {h.snippet && <span className="block text-xs text-ink-faint truncate">{h.snippet}</span>}
                   </span>
                   <span className="shrink-0 text-[10px] uppercase tracking-wide text-ink-faint">{h.kind === "point" ? "note" : "context"}</span>
                 </button>

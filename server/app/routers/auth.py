@@ -1,11 +1,14 @@
 #first-run account setup + session-cookie login for the web frontend
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import json
+import time
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..db import get_session
 from ..deps import admin_user_id, get_current_user
-from ..models import User
+from ..models import User, UserPref
 from ..security import hash_password, verify_password
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -56,6 +59,29 @@ def logout(request: Request):
 @router.get("/me")
 def me(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     return {"id": user.id, "username": user.username, "is_admin": user.id == admin_user_id(session)}
+
+@router.get("/prefs")
+def get_prefs(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #the user's web UI preferences (home page layout). returns {} until they've saved any.
+    row = session.exec(select(UserPref).where(UserPref.user_id == user.id)).first()
+    if not row:
+        return {}
+    try:
+        return json.loads(row.home_json or "{}")
+    except (ValueError, TypeError):
+        return {}
+
+@router.put("/prefs")
+def put_prefs(body: dict = Body(...), user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #replace the user's home-page preferences with the posted object (kept opaque to the server)
+    row = session.exec(select(UserPref).where(UserPref.user_id == user.id)).first()
+    if not row:
+        row = UserPref(user_id=user.id)
+    row.home_json = json.dumps(body or {})
+    row.updated = int(time.time())
+    session.add(row)
+    session.commit()
+    return {"ok": True}
 
 @router.post("/account")
 def update_account(body: AccountUpdate, user: User = Depends(get_current_user), session: Session = Depends(get_session)):

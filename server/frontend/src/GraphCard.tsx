@@ -43,6 +43,16 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
   const [target, setTarget] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
   const [dir, setDir] = useState<"to" | "from" | "none">("to");
+  const [aliasesOpen, setAliasesOpen] = useState(false);
+  const [aliasDraft, setAliasDraft] = useState("");
+  const [aliasErr, setAliasErr] = useState("");
+  const submitAlias = () => {
+    const t = aliasDraft.trim();
+    if (!t) return;
+    const err = ops.addAlias(ckey, t);
+    if (err) { setAliasErr(err); return; }
+    setAliasDraft(""); setAliasErr("");
+  };
 
   const others = Object.entries(contexts).filter(([k]) => k !== ckey)
     .sort((a, b) => (a[1].title || a[0]).localeCompare(b[1].title || b[0]));
@@ -107,6 +117,36 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
                      onChange={(e) => setCustomVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyCustom()} />
               <button className="px-2.5 py-1 rounded-md bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition disabled:opacity-50"
                       disabled={!customVal.trim()} onClick={applyCustom}>Set</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!confirmDel && (
+        <div className="px-3 py-1.5 border-b border-line text-xs">
+          <button className="flex items-center gap-1 text-ink-soft hover:text-ink transition"
+                  onClick={() => setAliasesOpen((v) => !v)} aria-expanded={aliasesOpen}>
+            <span className={`transition-transform ${aliasesOpen ? "rotate-90" : ""}`}>›</span>
+            <span className="font-medium">Aliases</span>
+            <span className="text-ink-faint tabular-nums">({ctx.aliases?.length ?? 0})</span>
+          </button>
+          {aliasesOpen && (
+            <div className="mt-1 pl-4 space-y-1">
+              {(ctx.aliases || []).map((a, i) => (
+                <div key={i} className="flex items-center gap-1.5 group/al">
+                  <span className="flex-1 min-w-0 truncate text-ink-faint">{a}</span>
+                  <button className="shrink-0 text-ink-faint hover:text-red-600 transition opacity-60 group-hover/al:opacity-100"
+                          title="Remove alias" aria-label="Remove alias" onClick={() => ops.deleteAlias(ckey, i)}>×</button>
+                </div>
+              ))}
+              <form onSubmit={(e) => { e.preventDefault(); submitAlias(); }} className="flex gap-1 pt-0.5">
+                <input className="flex-1 min-w-0 px-1.5 py-0.5 rounded-md border border-line bg-paper-card text-xs focus:outline-none focus:border-accent-ring"
+                       placeholder="add an alias…" value={aliasDraft} onPointerDown={(e) => e.stopPropagation()}
+                       onChange={(e) => { setAliasDraft(e.target.value); setAliasErr(""); }} />
+                <button type="submit" disabled={!aliasDraft.trim()}
+                        className="shrink-0 px-2 py-0.5 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-hover transition disabled:opacity-50">Add</button>
+              </form>
+              {aliasErr && <p className="text-red-600">{aliasErr}</p>}
             </div>
           )}
         </div>

@@ -86,6 +86,33 @@ function ContextCreator:init()
                 end,
             }
         end)
+        self.ui.highlight:addToHighlightDialog("15_contextcreator_open", function(this)
+            return {
+                text = _("Open context"),
+                callback = function()
+                    local sel = this.selected_text
+                    local word = sel and sel.text
+                    local pos = sel and sel.pos0 -- carried so a new context's first point can be anchored
+                    this:onClose()
+                    if word and word ~= "" then
+                        self.view:openMatchingContext(word, pos)
+                    end
+                end,
+            }
+        end)
+        self.ui.highlight:addToHighlightDialog("16_contextcreator_alias", function(this)
+            return {
+                text = _("Add as alias"),
+                callback = function()
+                    local sel = this.selected_text
+                    local word = sel and sel.text
+                    this:onClose()
+                    if word and word ~= "" then
+                        self.view:addWordAsAlias(word)
+                    end
+                end,
+            }
+        end)
     end
 end
 
