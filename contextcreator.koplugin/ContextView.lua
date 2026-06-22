@@ -180,6 +180,22 @@ local function pointProgress(point)
     return type(point) == "table" and type(point.progress) == "number" and point.progress or nil
 end
 
+--is a point anchored beyond the reader's current spot (i.e. should be hidden as a "later" note)?
+--compares by page when we can: raw progress is finer than a page, so the reading position (the top
+--of the page) is a smidge below a note made lower on the same page, which would wrongly hide it.
+--comparing page numbers means a note made anywhere on the current page still counts as "here".
+--falls back to the 0..1 progress for legacy points / formats without page info.
+function ContextView:pointBeyond(point, cur)
+    if cur.page then
+        local pos = ContextSchema.pointPos(point)
+        local page = pos and self.store:describeLocator(pos).page
+        if type(page) == "number" then return page > cur.page end
+    end
+    local pp = pointProgress(point)
+    if pp == nil or cur.progress == nil then return false end
+    return pp > cur.progress + 1e-6
+end
+
 
 --editing
 
@@ -269,9 +285,86 @@ function ContextView:showSimilarChooser(word, similar, pos)
     UIManager:show(dialog)
 end
 
+--resolve a highlighted word to an existing context and open its dot points.
+--an exact (normalized) match opens straight away; fuzzy look-alikes go through a chooser;
+--nothing alike just reports that there's no matching context.
+function ContextView:openMatchingContext(word, pos)
+    local key = ContextText.normalizeWord(word)
+    if key == "" then return end
+
+    local doc = self.store:load()
+    if doc.contexts[key] then
+        self:showPointsList(key) --exact match, open it immediately
+        return
+    end
+
+    local similar = self:findSimilarNodes(doc, word)
+    if #similar == 0 then
+        --no context yet: offer to create one for the highlighted word
+        local dialog
+        dialog = ButtonDialog:new{
+            title = T(_("No context matches \u{201C}%1\u{201D} yet."), ContextText.trim(word)),
+            title_align = "center",
+            buttons = {
+                {{
+                    text = T(_("Create \u{201C}%1\u{201D}"), ContextText.trim(word)),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self:createNewContext(ContextText.trim(word), pos)
+                    end,
+                }},
+                {{
+                    text = _("Cancel"),
+                    callback = function() UIManager:close(dialog) end,
+                }},
+            },
+        }
+        UIManager:show(dialog)
+    else
+        self:showOpenChooser(word, similar, pos) --close matches: let the user pick which to open
+    end
+end
+
+--list the contexts that look like the highlighted word and open whichever one is chosen,
+--or create a brand new context for the word if none of them are right
+function ContextView:showOpenChooser(word, similar, pos)
+    local dialog
+    local buttons = {}
+    for i = 1, #similar do
+        local m = similar[i]
+        table.insert(buttons, {{
+            text = T(_("Open \u{201C}%1\u{201D}"), m.title),
+            callback = function()
+                UIManager:close(dialog)
+                self:showPointsList(m.key)
+            end,
+        }})
+    end
+    table.insert(buttons, {{
+        text = T(_("Create \u{201C}%1\u{201D} instead"), ContextText.trim(word)),
+        callback = function()
+            UIManager:close(dialog)
+            self:createNewContext(ContextText.trim(word), pos)
+        end,
+    }})
+    table.insert(buttons, {{
+        text = _("Cancel"),
+        callback = function() UIManager:close(dialog) end,
+    }})
+
+    dialog = ButtonDialog:new{
+        title = T(_("Open a context matching \u{201C}%1\u{201D}?"), ContextText.trim(word)),
+        title_align = "center",
+        buttons = buttons,
+    }
+    UIManager:show(dialog)
+end
+
 --brand new context setup, step 1: confirm/edit the name (prefilled from the highlighted word).
 --pos carries the highlight location through to the first dot point.
-function ContextView:createNewContext(name, pos)
+--prev_key is set when we arrive here via "Back" from the type step: it's the context we
+--provisionally created, so a name change can clean it up instead of leaving an orphan.
+function ContextView:createNewContext(name, pos, prev_key)
     --do we already have any contexts? if so we can offer to pick one instead of making a new one
     local has_existing = next(self.store:load().contexts) ~= nil
 
@@ -291,10 +384,19 @@ function ContextView:createNewContext(name, pos)
                 if title == "" then return end
                 local key = ContextText.normalizeWord(title)
                 if key == "" then return end
-                --if the typed name lands on a context that already exists, add a point to that one
                 local doc = self.store:load()
+                --renamed away from a provisional context we made earlier in this flow: drop it if empty
+                if prev_key and prev_key ~= key then
+                    local prev = doc.contexts[prev_key]
+                    if prev and #prev.points == 0 then
+                        ContextSchema.deleteNode(doc, prev_key)
+                        self.store:save(doc)
+                    end
+                end
+                --if the typed name lands on a context that already exists (and isn't the one we're
+                --still building), add a point to that one; otherwise carry on to the type step
                 local existing = doc.contexts[key]
-                if existing then
+                if existing and key ~= prev_key then
                     self:editPoint(key, existing.title, nil, nil, true, pos)
                 else
                     self:chooseTypeForNewContext(key, title, pos)
@@ -367,15 +469,20 @@ function ContextView:chooseTypeForNewContext(key, title, pos)
     local function pickType(t)
         if t ~= "unset" then
             local d = self.store:load()
-            if not d.contexts[key] then
+            local node = d.contexts[key]
+            if node then
+                --came back to change the type of a context we already created: update it in place
+                node.type = t
+                node.updated = ContextSchema.now()
+            else
                 --anchor the new context to the reading position so it has a timeline slot
                 local a = self.store:describeLocator(pos) or {}
                 d.contexts[key] = {
                     title = title, type = t, points = {}, updated = ContextSchema.now(),
                     progress = a.progress, chapter = a.chapter,
                 }
-                self.store:save(d)
             end
+            self.store:save(d)
         end
         self:editPoint(key, title, nil, true, false, pos) -- allow "Skip for now" on the first point
     end
@@ -396,11 +503,16 @@ function ContextView:chooseTypeForNewContext(key, title, pos)
             self:promptCustomType(pickType)
         end,
     }}
-    --cancel and "Skip for now" (no type yet) share the bottom row, cancel on the left
+    --bottom row: Cancel, then Back to the name step, then "Skip for now" (no type yet).
+    --Back keeps any context we already made so it can be cleaned up if the name is changed.
     buttons[#buttons + 1] = {
         {
             text = _("Cancel"),
             callback = function() UIManager:close(dialog) end,
+        },
+        {
+            text = _("\u{2190} Back"),
+            callback = function() UIManager:close(dialog); self:createNewContext(title, pos, key) end,
         },
         {
             text = _("Skip for now"),
@@ -449,15 +561,15 @@ function ContextView:showPointsList(key, reveal_all)
     --what's ahead. the choice is the same persisted setting used by the all-contexts filter.
     --reveal_all is a one-off override (tapping the "hidden" notice); it isn't persisted, so
     --reopening this list later goes back to hiding the later notes.
-    local progress = self.store:describeLocator(nil).progress
+    local cur = self.store:describeLocator(nil)
+    local progress = cur.progress
     local hiding = self:getOnlyRead() and progress ~= nil --the setting wants later notes hidden
     local only_read = hiding and not reveal_all --reveal_all overrides it for this viewing
 
     local items = {}
     local later = 0 --notes beyond the reading position that the setting would hide
     for i, point in ipairs(points) do
-        local pp = pointProgress(point)
-        local beyond = hiding and pp and pp > progress + 1e-6
+        local beyond = hiding and self:pointBeyond(point, cur)
         if beyond then later = later + 1 end
         if only_read and beyond then
             --noted ahead of where we are, keep it out of sight (index i still maps in node.points)
@@ -668,16 +780,26 @@ function ContextView:editPoint(key, title, index, allow_skip, allow_redirect, po
             end,
         },
     }}
-    --while creating a brand new context, let the user set it up without a point yet
+    --while creating a brand new context, let the user set it up without a point yet,
+    --or step back to the type picker to change the type they just chose
     if index == nil and allow_skip then
-        table.insert(rows, {{
-            text = _("Skip for now"),
-            callback = function()
-                ensureNode()        -- keep the freshly created context even with no points
-                self.store:save(doc)
-                UIManager:close(dialog)
-            end,
-        }})
+        table.insert(rows, {
+            {
+                text = _("\u{2190} Back"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:chooseTypeForNewContext(key, title, pos)
+                end,
+            },
+            {
+                text = _("Skip for now"),
+                callback = function()
+                    ensureNode()        -- keep the freshly created context even with no points
+                    self.store:save(doc)
+                    UIManager:close(dialog)
+                end,
+            },
+        })
     end
     --when we got here from "Add to context", let the user redirect the point to another context
     if index == nil and allow_redirect then
@@ -1218,14 +1340,14 @@ function ContextView:showRelationshipView(rel_id, reveal_all)
 
     --like the context points list, hide link notes from beyond the current reading position by default.
     --reveal_all is a one-off override (tapping the "hidden" notice) and isn't persisted.
-    local progress = self.store:describeLocator(nil).progress
+    local cur = self.store:describeLocator(nil)
+    local progress = cur.progress
     local only_read = self:getOnlyRead() and progress ~= nil and not reveal_all
 
     local items = {}
     local hidden = 0
     for i, point in ipairs(rel.points) do
-        local pp = pointProgress(point)
-        if only_read and pp and pp > progress + 1e-6 then
+        if only_read and self:pointBeyond(point, cur) then
             hidden = hidden + 1
         else
             table.insert(items, {
