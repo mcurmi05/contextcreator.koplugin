@@ -170,6 +170,44 @@ export function setType(doc: Doc, key: string, type: string) {
   doc.updated = now();
 }
 
+//resolve a word to a context key by an exact (normalized) match on a title or alias, mirroring the
+//device's ContextView:resolveContextKey. used to keep aliases unambiguous.
+export function resolveContextKey(doc: Doc, word: string): string | undefined {
+  const norm = normalizeWord(word);
+  if (!norm) return undefined;
+  if (doc.contexts[norm]) return norm;
+  for (const key in doc.contexts) {
+    for (const a of doc.contexts[key].aliases || []) {
+      if (normalizeWord(a) === norm) return key;
+    }
+  }
+  return undefined;
+}
+
+//add an alias (another matching name) to a context. returns an error string if the name already
+//resolves to a context (kept unambiguous), or null on success.
+export function addAlias(doc: Doc, key: string, text: string): string | null {
+  const ctx = doc.contexts[key];
+  if (!ctx) return "Context no longer exists.";
+  text = text.trim();
+  if (!normalizeWord(text)) return "Enter a name.";
+  const owner = resolveContextKey(doc, text);
+  if (owner === key) return "That name already matches this context.";
+  if (owner) return `“${text}” already matches “${doc.contexts[owner].title || owner}”.`;
+  ctx.aliases = [...(ctx.aliases || []), text];
+  ctx.updated = now();
+  doc.updated = now();
+  return null;
+}
+
+export function deleteAlias(doc: Doc, key: string, index: number) {
+  const ctx = doc.contexts[key];
+  if (!ctx || !ctx.aliases || index < 0 || index >= ctx.aliases.length) return;
+  ctx.aliases = ctx.aliases.filter((_, i) => i !== index);
+  ctx.updated = now();
+  doc.updated = now();
+}
+
 export function deletePoint(doc: Doc, key: string, ref: PointRef) {
   const ctx = doc.contexts[key];
   if (!ctx) return;

@@ -16,6 +16,7 @@ export interface Context {
   updated?: number;
   progress?: number;
   chapter?: string;
+  aliases?: string[];   //extra display names that also match this context (set on the device)
 }
 
 export interface Relationship {
@@ -65,6 +66,8 @@ export interface GraphEditOps {
   renameContext: (key: string, title: string) => void;
   deleteContext: (key: string) => void;
   setType: (key: string, type: string) => void;
+  addAlias: (key: string, text: string) => string | null;  //returns an error message, or null on success
+  deleteAlias: (key: string, index: number) => void;
   deletePoint: (key: string, ref: PointRef) => void;
   createLink: (from: string, to: string, label: string, directed: boolean) => void;
   editLinkLabel: (id: string, label: string) => void;

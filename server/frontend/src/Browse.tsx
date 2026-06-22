@@ -128,6 +128,9 @@ export default function Browse({ doc, scrub, selected, onSelect, onAddContext, o
                           className={`text-left rounded-xl border bg-paper-card p-3 shadow-card transition hover:shadow-pop hover:-translate-y-0.5 ${
                             dim ? "opacity-50" : ""} ${sel ? "border-accent ring-2 ring-accent/30" : "border-line"}`}>
                     <strong className="block truncate">{c.title}</strong>
+                    {(c.aliases?.length ?? 0) > 0 && (
+                      <span className="block truncate text-xs text-ink-faint">aka {c.aliases!.join(", ")}</span>
+                    )}
                     <ul className="mt-1.5 space-y-1 text-sm text-ink-soft">
                       {(c.points || []).slice(0, 4).map((p, i) => {
                         const pr = pointProgress(p);

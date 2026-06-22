@@ -8,6 +8,7 @@ pure data operations live in ContextSchema, pure text helpers in ContextText
 
 local Button = require("ui/widget/button")
 local ButtonDialog = require("ui/widget/buttondialog")
+local ConfirmBox = require("ui/widget/confirmbox")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
@@ -211,14 +212,32 @@ function ContextView:openContext(key, title)
     end
 end
 
---existing contexts that are similar (but not an exact match) to the word, best first
---keys are already normalized, so we compare the word's normalized form against them directly
+--resolve a word to a context key by an EXACT (normalized) match on the title or any alias.
+--returns the context key, or nil if nothing matches exactly.
+function ContextView:resolveContextKey(doc, word)
+    local norm = ContextText.normalizeWord(word)
+    if norm == "" then return nil end
+    if doc.contexts[norm] then return norm end --title match
+    for key, node in pairs(doc.contexts) do
+        for _, alias in ipairs(node.aliases or {}) do
+            if ContextText.normalizeWord(alias) == norm then return key end --alias match
+        end
+    end
+    return nil
+end
+
+--existing contexts that are similar (but not an exact match) to the word, best first.
+--keys are already normalized, so we compare the word's normalized form against them directly,
+--and also against each context's aliases so a look-alike of an alias still suggests its context.
 function ContextView:findSimilarNodes(doc, word)
     local norm = ContextText.normalizeWord(word)
     local matches = {}
     for key, node in pairs(doc.contexts) do
         if key ~= norm then
             local score = ContextText.similarity(norm, key)
+            for _, alias in ipairs(node.aliases or {}) do
+                score = math.max(score, ContextText.similarity(norm, ContextText.normalizeWord(alias)))
+            end
             if score >= ContextText.SIMILARITY_THRESHOLD then
                 table.insert(matches, { key = key, title = node.title, score = score })
             end
@@ -232,12 +251,12 @@ end
 --an exact (normalized) match goes straight to a new dot point, fuzzy look-alikes go through the chooser.
 --pos is the book locator of the highlight, carried so the new point can be anchored to it.
 function ContextView:showEntryEditor(word, pos)
-    local key = ContextText.normalizeWord(word)
-    if key == "" then return end
+    if ContextText.normalizeWord(word) == "" then return end
 
     local doc = self.store:load()
-    local node = doc.contexts[key]
-    if node then
+    local key = self:resolveContextKey(doc, word) --exact title or alias match
+    if key then
+        local node = doc.contexts[key]
         --exact match: add a point to it, with the option to redirect to a different context
         self:editPoint(key, node.title, nil, nil, true, pos)
         return
@@ -289,11 +308,11 @@ end
 --an exact (normalized) match opens straight away; fuzzy look-alikes go through a chooser;
 --nothing alike just reports that there's no matching context.
 function ContextView:openMatchingContext(word, pos)
-    local key = ContextText.normalizeWord(word)
-    if key == "" then return end
+    if ContextText.normalizeWord(word) == "" then return end
 
     local doc = self.store:load()
-    if doc.contexts[key] then
+    local key = self:resolveContextKey(doc, word) --exact title or alias match
+    if key then
         self:showPointsList(key) --exact match, open it immediately
         return
     end
@@ -302,22 +321,33 @@ function ContextView:openMatchingContext(word, pos)
     if #similar == 0 then
         --no context yet: offer to create one for the highlighted word
         local dialog
+        local buttons = {
+            {{
+                text = T(_("Create \u{201C}%1\u{201D}"), ContextText.trim(word)),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:createNewContext(ContextText.trim(word), pos)
+                end,
+            }},
+        }
+        --only worth offering once at least one context exists to attach it to
+        if next(doc.contexts) ~= nil then
+            table.insert(buttons, {{
+                text = _("Add as alias to existing context"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:addWordAsAlias(word)
+                end,
+            }})
+        end
+        table.insert(buttons, {{
+            text = _("Cancel"),
+            callback = function() UIManager:close(dialog) end,
+        }})
         dialog = ButtonDialog:new{
             title = T(_("No context matches \u{201C}%1\u{201D} yet."), ContextText.trim(word)),
             title_align = "center",
-            buttons = {
-                {{
-                    text = T(_("Create \u{201C}%1\u{201D}"), ContextText.trim(word)),
-                    callback = function()
-                        UIManager:close(dialog)
-                        self:createNewContext(ContextText.trim(word), pos)
-                    end,
-                }},
-                {{
-                    text = _("Cancel"),
-                    callback = function() UIManager:close(dialog) end,
-                }},
-            },
+            buttons = buttons,
         }
         UIManager:show(dialog)
     else
@@ -345,6 +375,13 @@ function ContextView:showOpenChooser(word, similar, pos)
         callback = function()
             UIManager:close(dialog)
             self:createNewContext(ContextText.trim(word), pos)
+        end,
+    }})
+    table.insert(buttons, {{
+        text = _("Add as alias to existing context"),
+        callback = function()
+            UIManager:close(dialog)
+            self:addWordAsAlias(word)
         end,
     }})
     table.insert(buttons, {{
@@ -405,15 +442,27 @@ function ContextView:createNewContext(name, pos, prev_key)
         },
     }}
     --escape hatch: maybe this really is a context we already made but the matcher didnt catch it.
-    --let the user pick it from the list instead (only worth showing once some contexts exist)
+    --let the user add a point to it, or attach this name to it as an alias (both only worth showing
+    --once some contexts exist)
     if has_existing then
-        table.insert(rows, {{
-            text = _("Select existing context instead"),
-            callback = function()
-                UIManager:close(dialog)
-                self:showExistingContextPicker(pos)
-            end,
-        }})
+        table.insert(rows, {
+            {
+                text = _("Select existing context instead"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showExistingContextPicker(pos)
+                end,
+            },
+            {
+                text = _("Add as alias to existing context"),
+                callback = function()
+                    local alias = ContextText.trim(dialog:getInputText())
+                    if alias == "" then alias = name or "" end
+                    UIManager:close(dialog)
+                    self:addWordAsAlias(alias)
+                end,
+            },
+        })
     end
 
     dialog = InputDialog:new{
@@ -635,12 +684,26 @@ function ContextView:showPointsList(key, reveal_all)
     self:addFooterButton(menu, "right", _("\u{2194}"), function()
         self:showRelationships(key, menu)
     end)
+    self:addFooterButton(menu, "right", _("\u{2248}"), function() --aliases (other names for this context)
+        self:showAliases(menu, key)
+    end)
     self:addFooterButton(menu, "right", _("\u{FF0B}"), function()
         UIManager:close(menu)
         self:editPoint(key, node.title, nil)
     end)
 
     UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
+end
+
+--ask before doing something destructive: pops a Cancel / Delete confirmation, runs on_confirm on Delete.
+--guards every deletion so nothing is removed by a single accidental tap.
+function ContextView:confirmDelete(text, on_confirm)
+    UIManager:show(ConfirmBox:new{
+        text = text,
+        ok_text = _("Delete"),
+        cancel_text = _("Cancel"),
+        ok_callback = on_confirm,
+    })
 end
 
 --long-press a dot point: jump to where it was noted (if anchored), or delete it
@@ -665,16 +728,18 @@ function ContextView:showPointActions(menu, key, index)
         text = _("Delete"),
         callback = function()
             UIManager:close(dialog)
-            local d = self.store:load()
-            local n = d.contexts[key]
-            if n then
-                ContextSchema.tombstonePoint(d, n.points[index]) -- so the delete survives a sync
-                table.remove(n.points, index)
-                n.updated = ContextSchema.now()
-                self.store:save(d)
-            end
-            UIManager:close(menu)
-            self:returnToList(key)
+            self:confirmDelete(_("Delete this dot point?"), function()
+                local d = self.store:load()
+                local n = d.contexts[key]
+                if n then
+                    ContextSchema.tombstonePoint(d, n.points[index]) -- so the delete survives a sync
+                    table.remove(n.points, index)
+                    n.updated = ContextSchema.now()
+                    self.store:save(d)
+                end
+                UIManager:close(menu)
+                self:returnToList(key)
+            end)
         end,
     }})
     table.insert(buttons, {{
@@ -683,7 +748,7 @@ function ContextView:showPointActions(menu, key, index)
     }})
 
     dialog = ButtonDialog:new{
-        title = pos and _("Dot point") or _("Delete this dot point?"),
+        title = _("Dot point"),
         title_align = "center",
         buttons = buttons,
     }
@@ -1018,6 +1083,13 @@ function ContextView:showNodeActions(menu, key)
                 end,
             }},
             {{
+                text = T(_("Aliases (%1)"), #(node.aliases or {})),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showAliases(menu, key)
+                end,
+            }},
+            {{
                 text = _("Edit name"),
                 callback = function()
                     UIManager:close(dialog)
@@ -1028,11 +1100,13 @@ function ContextView:showNodeActions(menu, key)
                 text = _("Delete"),
                 callback = function()
                     UIManager:close(dialog)
-                    local d = self.store:load()
-                    ContextSchema.deleteNode(d, key)
-                    self.store:save(d)
-                    UIManager:close(menu)
-                    self:showAllContexts()
+                    self:confirmDelete(T(_("Delete the context \u{201C}%1\u{201D} and all its dot points?"), node.title), function()
+                        local d = self.store:load()
+                        ContextSchema.deleteNode(d, key)
+                        self.store:save(d)
+                        UIManager:close(menu)
+                        self:showAllContexts()
+                    end)
                 end,
             }},
             {{
@@ -1133,22 +1207,13 @@ function ContextView:renameNode(menu, key)
                         --same identity, just a display-name tweak
                         node.title = new_title
                         node.updated = ContextSchema.now()
+                    elseif doc.contexts[new_key] then
+                        --another node already owns this name: merge points into it
+                        ContextSchema.mergeNodeInto(doc, key, new_key)
                     else
-                        local target = doc.contexts[new_key]
-                        if target then -- another node already owns this name: merge points in
-                            for _, p in ipairs(node.points) do
-                                table.insert(target.points, p)
-                            end
-                            target.updated = ContextSchema.now()
-                        else
-                            node.title = new_title
-                            node.updated = ContextSchema.now()
-                            doc.contexts[new_key] = node
-                        end
-                        ContextSchema.repointRelationships(doc, key, new_key)
-                        doc.contexts[key] = nil
-                        doc.tombstones.contexts[key] = ContextSchema.now()
-                        doc.tombstones.contexts[new_key] = nil
+                        --moves to the new key; re-id's points + tombstones the old key so the old
+                        --context doesn't survive on the server as a duplicate after sync
+                        ContextSchema.moveNode(doc, key, new_key, new_title)
                     end
                     self.store:save(doc)
                     UIManager:close(menu)
@@ -1159,6 +1224,228 @@ function ContextView:renameNode(menu, key)
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
+end
+
+
+--aliases: extra names a highlighted word can match to this context
+--(e.g. "Albus Dumbledore" / "Professor Dumbledore" both resolving to the "Dumbledore" context)
+
+--list a context's aliases. the main name sits at the top with a star, the aliases follow.
+--tap an alias to promote/delete it, tap + to add one. parent_menu is the all-contexts list behind us.
+function ContextView:showAliases(parent_menu, key)
+    local doc = self.store:load()
+    local node = doc.contexts[key]
+    if not node then return end
+    local aliases = node.aliases or {}
+
+    local items = {}
+    items[#items + 1] = { text = "\u{2605} " .. node.title, _main = true } --main name, starred, at the top
+    for i, alias in ipairs(aliases) do
+        items[#items + 1] = { text = BULLET .. alias, _index = i }
+    end
+
+    local menu
+    menu = Menu:new{
+        title = T(_("Aliases for \u{201C}%1\u{201D}"), node.title),
+        item_table = items,
+        width = Screen:getWidth() - 2 * WINDOW_MARGIN,
+        height = Screen:getHeight() - 2 * WINDOW_MARGIN,
+        is_popout = false,
+        onMenuSelect = function(_self, item)
+            if item._main then return end --the starred main name isn't an alias to act on
+            self:showAliasActions(menu, parent_menu, key, item._index)
+        end,
+        onMenuHold = function(_self, item)
+            if item._main then return true end
+            self:showAliasActions(menu, parent_menu, key, item._index)
+            return true
+        end,
+        close_callback = function() UIManager:close(menu) end,
+    }
+
+    --back to the context list, and + to add a new alias
+    self:addFooterButton(menu, "left", _("\u{2190}"), function() UIManager:close(menu) end)
+    self:addFooterButton(menu, "right", _("\u{FF0B}"), function() self:promptAddAlias(menu, parent_menu, key) end)
+
+    UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
+end
+
+--act on one alias: make it the context's main name, or delete it
+function ContextView:showAliasActions(alias_menu, parent_menu, key, index)
+    local doc = self.store:load()
+    local node = doc.contexts[key]
+    local alias = node and node.aliases and node.aliases[index]
+    if not alias then return end
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = alias,
+        title_align = "center",
+        buttons = {
+            {{
+                text = _("Make main name"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:promoteAlias(alias_menu, parent_menu, key, index)
+                end,
+            }},
+            {{
+                text = _("Delete alias"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:confirmDelete(T(_("Delete the alias \u{201C}%1\u{201D}?"), alias), function()
+                        local d = self.store:load()
+                        local n = d.contexts[key]
+                        if n and n.aliases then
+                            table.remove(n.aliases, index)
+                            n.updated = ContextSchema.now()
+                            self.store:save(d)
+                        end
+                        UIManager:close(alias_menu)
+                        self:showAliases(parent_menu, key) --refresh the list
+                    end)
+                end,
+            }},
+            {{
+                text = _("Cancel"),
+                callback = function() UIManager:close(dialog) end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
+end
+
+--add `text` as an alias of context `key` (in `doc`, not yet saved), keeping matching unambiguous:
+--refuses a name that already resolves to a context. returns true on success, or shows why and
+--returns false. the caller saves the doc.
+function ContextView:tryAddAlias(doc, key, text)
+    text = ContextText.trim(text)
+    local node = doc.contexts[key]
+    if not node or ContextText.normalizeWord(text) == "" then return false end
+    local owner = self:resolveContextKey(doc, text)
+    if owner == key then
+        UIManager:show(InfoMessage:new{ text = _("That name already matches this context.") })
+        return false
+    elseif owner then
+        UIManager:show(InfoMessage:new{
+            text = T(_("\u{201C}%1\u{201D} already matches the context \u{201C}%2\u{201D}."), text, ContextSchema.titleForKey(doc, owner)),
+        })
+        return false
+    end
+    node.aliases = node.aliases or {}
+    table.insert(node.aliases, text)
+    node.updated = ContextSchema.now()
+    return true
+end
+
+--pick an existing context to attach the highlighted word to as an alias, then open it.
+--used from the "open/create context" flows when the word is really another name for a context.
+function ContextView:addWordAsAlias(word)
+    local doc = self.store:load()
+    local items = {}
+    for key, node in pairs(doc.contexts) do
+        local label = ContextSchema.typeLabel(node.type)
+        local text = label ~= "" and T("%1  \u{00B7} %2", node.title, label) or node.title
+        table.insert(items, { text = text, _key = key, _title = node.title })
+    end
+    if #items == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No contexts in this book yet.") })
+        return
+    end
+    table.sort(items, function(a, b) return a._title:lower() < b._title:lower() end)
+
+    local menu
+    menu = Menu:new{
+        title = T(_("Add \u{201C}%1\u{201D} as an alias of\u{2026}"), ContextText.trim(word)),
+        item_table = items,
+        width = Screen:getWidth() - 2 * WINDOW_MARGIN,
+        height = Screen:getHeight() - 2 * WINDOW_MARGIN,
+        is_popout = false,
+        onMenuSelect = function(_self, item)
+            local d = self.store:load()
+            if self:tryAddAlias(d, item._key, word) then
+                self.store:save(d)
+                UIManager:close(menu)
+                self:showPointsList(item._key) --open the context the word now belongs to
+            end
+        end,
+        close_callback = function() UIManager:close(menu) end,
+    }
+    UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
+end
+
+--prompt for a new alias, refusing names that already resolve to a context, then add it
+function ContextView:promptAddAlias(alias_menu, parent_menu, key)
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Add alias"),
+        input = "",
+        input_hint = _("Another name for this context"),
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            {
+                text = _("Add"),
+                is_enter_default = true,
+                callback = function()
+                    local text = ContextText.trim(dialog:getInputText())
+                    UIManager:close(dialog)
+                    if text == "" then return end
+                    local doc = self.store:load()
+                    if self:tryAddAlias(doc, key, text) then
+                        self.store:save(doc)
+                        UIManager:close(alias_menu)
+                        self:showAliases(parent_menu, key) --refresh the list
+                    end
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+--promote an alias to be the context's main name, demoting the old name to an alias.
+--changing the name changes the context key (normalizeWord of the title), so we move the node
+--just like renameNode does (repointing relationships, tombstoning the old key for sync).
+function ContextView:promoteAlias(alias_menu, parent_menu, key, index)
+    local doc = self.store:load()
+    local node = doc.contexts[key]
+    if not node or not node.aliases or not node.aliases[index] then return end
+
+    local new_title = node.aliases[index]
+    local old_title = node.title
+    local new_key = ContextText.normalizeWord(new_title)
+    if new_key == "" then return end
+
+    --can't take over a name another context already owns
+    if new_key ~= key and doc.contexts[new_key] then
+        UIManager:show(InfoMessage:new{
+            text = T(_("A context named \u{201C}%1\u{201D} already exists, so it can't be promoted."), new_title),
+        })
+        return
+    end
+
+    --swap: the alias becomes the title, the old title becomes an alias (unless it's the same key,
+    --e.g. a possessive/case variant, in which case the old name still matches without listing it)
+    table.remove(node.aliases, index)
+    if ContextText.normalizeWord(old_title) ~= new_key then
+        table.insert(node.aliases, old_title)
+    end
+
+    if new_key ~= key then
+        --the key changes, so move the node (re-id'ing points + tombstoning the old key) instead of
+        --leaving the old context behind, which would come back as a duplicate after a sync
+        ContextSchema.moveNode(doc, key, new_key, new_title)
+    else
+        node.title = new_title
+        node.updated = ContextSchema.now()
+    end
+    self.store:save(doc)
+
+    --the context's title (and maybe key) changed, so refresh the list behind us too
+    UIManager:close(alias_menu)
+    if parent_menu then UIManager:close(parent_menu) end
+    self:showAllContexts()
 end
 
 
@@ -1434,16 +1721,18 @@ function ContextView:showRelationshipActions(menu, rel_id, list_key)
                 text = _("Delete"),
                 callback = function()
                     UIManager:close(dialog)
-                    local d = self.store:load()
-                    local rel, idx = ContextSchema.findRel(d, rel_id)
-                    if idx then
-                        for _, p in ipairs(rel.points) do ContextSchema.tombstonePoint(d, p) end
-                        d.tombstones.relationships[rel_id] = ContextSchema.now()
-                        table.remove(d.relationships, idx)
-                        self.store:save(d)
-                    end
-                    UIManager:close(menu)
-                    self:showRelationships(list_key)
+                    self:confirmDelete(_("Delete this relationship and its dot points?"), function()
+                        local d = self.store:load()
+                        local rel, idx = ContextSchema.findRel(d, rel_id)
+                        if idx then
+                            for _, p in ipairs(rel.points) do ContextSchema.tombstonePoint(d, p) end
+                            d.tombstones.relationships[rel_id] = ContextSchema.now()
+                            table.remove(d.relationships, idx)
+                            self.store:save(d)
+                        end
+                        UIManager:close(menu)
+                        self:showRelationships(list_key)
+                    end)
                 end,
             }},
             {{

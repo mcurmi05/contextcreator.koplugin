@@ -100,6 +100,19 @@ function ContextCreator:init()
                 end,
             }
         end)
+        self.ui.highlight:addToHighlightDialog("16_contextcreator_alias", function(this)
+            return {
+                text = _("Add as alias"),
+                callback = function()
+                    local sel = this.selected_text
+                    local word = sel and sel.text
+                    this:onClose()
+                    if word and word ~= "" then
+                        self.view:addWordAsAlias(word)
+                    end
+                end,
+            }
+        end)
     end
 end
 

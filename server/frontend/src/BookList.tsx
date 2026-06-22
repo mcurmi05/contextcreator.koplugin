@@ -1,7 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { readJsonFile } from "./files";
 import { loadProfile, saveProfile } from "./profilePref";
+import {
+  DEFAULT_PREFS, fetchHomePrefs, saveHomePrefs, applyManualOrder,
+  pinsFor, withOrder, withPins, type HomePrefs, type HomeSort,
+} from "./homePrefs";
 import { btn, input } from "./ui";
 import type { BookSummary, LibraryEntry } from "./types";
 
@@ -17,6 +21,48 @@ const byOrder = (a: BookSummary, b: BookSummary) =>
   (a.series_index ?? 0) - (b.series_index ?? 0) || (a.title || "").localeCompare(b.title || "");
 
 const isExternal = (b: BookSummary) => b.source === "external";
+
+//how long a reordered item takes to slide to its new spot, and the matching minimum gap between
+//reorders. kept slow + equal so each shift fully plays out and the user can follow what moved.
+const SLIDE_MS = 320;
+
+//FLIP animation: when the rendered order (orderKey) changes, slide each item from where it just was to
+//where it now is, so items reflow smoothly around the one being dragged. returns a ref callback to tag
+//each animatable element by id.
+function useFlip(orderKey: string) {
+  const nodes = useRef(new Map<string, HTMLElement>());
+  const prev = useRef(new Map<string, DOMRect>());
+  const cbs = useRef(new Map<string, (el: HTMLElement | null) => void>());
+  //stable ref callback per id, so React doesn't churn (null then set) the node map on every render
+  const register = useCallback((id: string) => {
+    let cb = cbs.current.get(id);
+    if (!cb) {
+      cb = (el: HTMLElement | null) => { if (el) nodes.current.set(id, el); else nodes.current.delete(id); };
+      cbs.current.set(id, cb);
+    }
+    return cb;
+  }, []);
+  useLayoutEffect(() => {
+    const cur = new Map<string, DOMRect>();
+    nodes.current.forEach((el, id) => cur.set(id, el.getBoundingClientRect()));
+    cur.forEach((rect, id) => {
+      const p = prev.current.get(id);
+      const el = nodes.current.get(id);
+      if (!p || !el) return;
+      const dx = p.left - rect.left, dy = p.top - rect.top;
+      if (dx || dy) {
+        el.style.transition = "none";
+        el.style.transform = `translate(${dx}px, ${dy}px)`;
+        requestAnimationFrame(() => {
+          el.style.transition = `transform ${SLIDE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+          el.style.transform = "";
+        });
+      }
+    });
+    prev.current = cur;
+  }, [orderKey]);
+  return register;
+}
 
 //small cover thumbnail; covers are data: urls synced from the device. renders nothing when absent
 //(e.g. imported docs, or books whose cover the device hasn't extracted yet), leaving the card unchanged.
@@ -34,6 +80,51 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
   const [attachFor, setAttachFor] = useState<string | null>(null); //external book_id being attached
   const [error, setError] = useState("");
   const [picked, setPicked] = useState<Record<string, string>>({}); //book_id -> profile_id to open at
+  const [prefs, setPrefs] = useState<HomePrefs>(DEFAULT_PREFS); //home layout (sort/group/order/pins), server-stored
+  const [dragId, setDragId] = useState<string | null>(null);       //unit being dragged in manual mode
+  const [preview, setPreview] = useState<string[] | null>(null);   //live reordered ids while dragging
+
+  useEffect(() => { void fetchHomePrefs().then(setPrefs); }, []);
+  //change prefs optimistically and persist to the server
+  const update = (next: HomePrefs) => { setPrefs(next); saveHomePrefs(next); };
+  const grouped = prefs.group;
+  const sort = prefs.sort;
+
+  function togglePin(id: string) {
+    const pins = pinsFor(prefs, grouped);
+    update(withPins(prefs, grouped, pins.includes(id) ? pins.filter((x) => x !== id) : [...pins, id]));
+  }
+  //where the dragged id should sit relative to the unit under the pointer. the side is decided by the
+  //pointer vs the target's midpoint (geometry, so it doesn't flip-flop as items reflow): for vertical
+  //series blocks that's the top/bottom half, for the books grid the left/right half of the cell.
+  function computeOrder(e: React.DragEvent, base: string[], targetId: string): string[] {
+    const cur = preview ?? base;
+    if (!dragId || targetId === dragId) return cur;
+    if (cur.indexOf(dragId) < 0 || cur.indexOf(targetId) < 0) return cur;
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const after = grouped ? e.clientY > r.top + r.height / 2 : e.clientX > r.left + r.width / 2;
+    const next = cur.filter((x) => x !== dragId);
+    let ti = next.indexOf(targetId);
+    if (after) ti += 1;
+    next.splice(ti, 0, dragId);
+    return next;
+  }
+  //throttle reorders so each slide animation settles before the next one — this is what stops the jitter
+  const lastMove = useRef(0);
+  function dragOver(e: React.DragEvent, base: string[], targetId: string) {
+    if (!dragId) return;
+    const now = performance.now();
+    if (now - lastMove.current < SLIDE_MS) return;
+    const next = computeOrder(e, base, targetId);
+    if (next.join("|") !== (preview ?? base).join("|")) { setPreview(next); lastMove.current = now; }
+  }
+  //drop: place at the final pointer position (ignoring the throttle) and commit the new order
+  function dropOn(e: React.DragEvent, base: string[], targetId: string) {
+    if (dragId) update(withOrder(prefs, grouped, computeOrder(e, base, targetId)));
+    setDragId(null); setPreview(null);
+  }
+  //dropped outside any unit (cancel): revert to the saved order
+  function clearDrag() { setDragId(null); setPreview(null); }
 
   //open a book at the chosen profile (remembering it so BookView lands there)
   function open(b: BookSummary) {
@@ -97,9 +188,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
     </select>
   );
 
-  if (!books) return <p className="text-ink-faint">Loading…</p>;
-
-  const externalBooks = books.filter(isExternal);
+  const externalBooks = (books || []).filter(isExternal);
 
   //one grid for every device book: those with contexts (real Book rows) plus the device's other books from
   //the read-history catalog (no notes yet, shown dimmed with "start contexts", hidden when the user turns
@@ -107,31 +196,165 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
   //so it's changed in koreader, not on the web. library entries already exclude anything that has a Book
   //row, so there are no duplicates.
   type DeviceCard = BookSummary & { started: boolean };
-  const startedBooks: DeviceCard[] = books.filter((b) => !isExternal(b)).map((b) => ({ ...b, started: true }));
+  const startedBooks: DeviceCard[] = (books || []).filter((b) => !isExternal(b)).map((b) => ({ ...b, started: true }));
   const libraryCards: DeviceCard[] = showUnstarted
     ? library.map((e) => ({ book_id: e.book_id, title: e.title, authors: e.authors, cover: e.cover, series: e.series || "", series_index: e.series_index ?? 0, started: false }))
     : [];
   const deviceBooks: DeviceCard[] = [...startedBooks, ...libraryCards];
 
-  //group by series, named series first (alphabetical), the unfiled bucket (incl. all un-started books) last
+  //within a series, started (annotated) books first, then the "start contexts" ones, by reading order
+  const cardOrder = (a: DeviceCard, b: DeviceCard) => Number(b.started) - Number(a.started) || byOrder(a, b);
+  const titleKey = (b: DeviceCard) => (b.title || b.book_id).toLowerCase();
+  const authorKey = (b: DeviceCard) => (b.authors || "").toLowerCase();
+  const pinFirst = (ids: string[], pins: string[]) => {
+    const set = new Set(pins);
+    return [...ids.filter((x) => set.has(x)), ...ids.filter((x) => !set.has(x))];
+  };
+
+  //flat mode: every book is its own card, ordered by the chosen sort, pinned books floated to the top
+  function orderedBooks(): DeviceCard[] {
+    const by = new Map(deviceBooks.map((b) => [b.book_id, b] as const));
+    let ids = deviceBooks.map((b) => b.book_id);
+    if (sort === "title") ids.sort((a, b) => titleKey(by.get(a)!).localeCompare(titleKey(by.get(b)!)));
+    else if (sort === "author") ids.sort((a, b) => authorKey(by.get(a)!).localeCompare(authorKey(by.get(b)!)) || titleKey(by.get(a)!).localeCompare(titleKey(by.get(b)!)));
+    else ids = applyManualOrder(ids, prefs.orderBooks);
+    return pinFirst(ids, prefs.pinBooks).map((id) => by.get(id)!);
+  }
+
+  //grouped mode: bucket by series, order the series sections by the chosen sort (pinned series first)
   const groups = new Map<string, DeviceCard[]>();
   for (const b of deviceBooks) {
     const s = b.series || "";
     if (!groups.has(s)) groups.set(s, []);
     groups.get(s)!.push(b);
   }
-  //within a group, started (annotated) books first, then the "start contexts" ones
-  const cardOrder = (a: DeviceCard, b: DeviceCard) => Number(b.started) - Number(a.started) || byOrder(a, b);
-  const named = [...groups.keys()].filter((s) => s).sort((a, b) => a.localeCompare(b));
-  const sections = [...named, ...(groups.has("") ? [""] : [])];
+  const seriesAuthor = (s: string) => ((groups.get(s) || []).slice().sort(cardOrder)[0]?.authors || "").toLowerCase();
+  function orderedSeries(): string[] {
+    let keys = [...groups.keys()];
+    if (sort === "manual") {
+      keys = applyManualOrder(keys, prefs.orderSeries);
+    } else {
+      const named = keys.filter((s) => s);
+      if (sort === "author") named.sort((a, b) => seriesAuthor(a).localeCompare(seriesAuthor(b)) || a.toLowerCase().localeCompare(b.toLowerCase()));
+      else named.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+      keys = groups.has("") ? [...named, ""] : named; //unfiled bucket last
+    }
+    return pinFirst(keys, prefs.pinSeries);
+  }
+
+  //reset the manual arrangement: re-seed the saved order for the current mode from a chosen sort
+  //(author or title), staying in manual so the user can keep tweaking from that starting point.
+  function resetOrder(by: "author" | "title") {
+    let ids: string[];
+    if (grouped) {
+      const named = [...groups.keys()].filter((s) => s);
+      if (by === "author") named.sort((a, b) => seriesAuthor(a).localeCompare(seriesAuthor(b)) || a.toLowerCase().localeCompare(b.toLowerCase()));
+      else named.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+      ids = groups.has("") ? [...named, ""] : named;
+    } else {
+      const m = new Map(deviceBooks.map((b) => [b.book_id, b] as const));
+      ids = deviceBooks.map((b) => b.book_id);
+      if (by === "title") ids.sort((a, b) => titleKey(m.get(a)!).localeCompare(titleKey(m.get(b)!)));
+      else ids.sort((a, b) => authorKey(m.get(a)!).localeCompare(authorKey(m.get(b)!)) || titleKey(m.get(a)!).localeCompare(titleKey(m.get(b)!)));
+    }
+    update(withOrder(prefs, grouped, ids));
+  }
+
+  //the order actually shown: the saved order, with the live drag preview applied for the active mode.
+  const byId = new Map(deviceBooks.map((b) => [b.book_id, b] as const));
+  const seriesIds = grouped && preview ? preview.filter((s) => groups.has(s)) : orderedSeries();
+  const bookIds = !grouped && preview ? preview.filter((id) => byId.has(id)) : orderedBooks().map((b) => b.book_id);
+  //re-run the slide animation whenever the shown order changes (a hook, so it runs every render)
+  const registerFlip = useFlip((grouped ? seriesIds : bookIds).join("|"));
+
+  const gridClass = "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 items-start gap-2.5";
+  const pinToggle = (id: string, pinned: boolean) => (
+    <button onClick={(e) => { e.stopPropagation(); togglePin(id); }} onPointerDown={(e) => e.stopPropagation()}
+            title={pinned ? "Unpin" : "Pin to top"} aria-label={pinned ? "Unpin" : "Pin to top"}
+            className={`shrink-0 text-sm leading-none transition ${pinned ? "text-accent" : "text-ink-faint hover:text-ink"}`}>
+      {pinned ? "★" : "☆"}
+    </button>
+  );
+
+  //a single book card. draggable (manual flat mode) and pinnable only when the book itself is the unit.
+  const renderCard = (b: DeviceCard, draggable: boolean, pinnable: boolean) => (
+    <div key={b.book_id} ref={registerFlip(b.book_id)}
+         draggable={draggable || undefined}
+         onDragStart={draggable ? (e) => { setDragId(b.book_id); e.dataTransfer.effectAllowed = "move"; } : undefined}
+         onDragEnd={draggable ? clearDrag : undefined}
+         onDragOver={draggable ? (e) => { e.preventDefault(); dragOver(e, bookIds, b.book_id); } : undefined}
+         onDrop={draggable ? (e) => { e.preventDefault(); dropOn(e, bookIds, b.book_id); } : undefined}
+         className={`group/card relative w-full rounded-xl border border-line bg-paper-card p-3 shadow-card transition hover:shadow-pop hover:border-accent-ring ${
+           draggable ? "cursor-move" : "cursor-pointer"} ${dragId === b.book_id ? "opacity-40 ring-2 ring-accent-ring" : ""} ${b.started ? "" : "opacity-65 hover:opacity-100"}`}>
+      {pinnable && <div className="absolute top-1 right-1 z-10">{pinToggle(b.book_id, prefs.pinBooks.includes(b.book_id))}</div>}
+      <button className="group flex w-full items-start gap-2.5 text-left"
+              onClick={() => (b.started ? open(b) : adopt(b.book_id))}>
+        <Cover src={b.cover} title={b.title} />
+        <span className="min-w-0 flex-1">
+          <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
+          {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
+        </span>
+      </button>
+      {b.started ? (
+        <>
+          {(b.profiles?.length ?? 0) >= 1 && (
+            <label className="mt-2 block">
+              <span className="block text-[10px] uppercase tracking-wide text-ink-faint mb-0.5">Profile</span>
+              {profileDropdown(b)}
+            </label>
+          )}
+          {b.series && (
+            <div className="mt-2 pt-2 border-t border-line">
+              <span className="block text-xs text-ink-soft">{b.series} · #{(b.series_index ?? 0) + 1}</span>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="mt-2 pt-2 border-t border-line">
+          <button className="text-xs font-medium text-accent-hover hover:underline transition"
+                  onClick={() => adopt(b.book_id)}>+ start contexts</button>
+          {b.series && <span className="block text-xs text-ink-soft mt-1">{b.series} · #{(b.series_index ?? 0) + 1}</span>}
+        </div>
+      )}
+    </div>
+  );
+
+  if (!books) return <p className="text-ink-faint">Loading…</p>;
 
   return (
     <div>
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
-      <div className="flex items-baseline gap-2 mb-1">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-faint">Your books</h2>
+        <span className="flex-1" />
+        <label className="flex items-center gap-1 text-xs text-ink-soft">
+          Sort
+          <select className={`${input} py-1 text-sm`} value={sort}
+                  onChange={(e) => update({ ...prefs, sort: e.target.value as HomeSort })}>
+            <option value="author">Author</option>
+            <option value="title">Title</option>
+            <option value="manual">Manual</option>
+          </select>
+        </label>
+        {sort === "manual" && deviceBooks.length > 0 && (
+          //re-seed the manual order from a chosen sort; the select snaps back to its placeholder
+          <select className={`${input} py-1 text-sm`} value="" aria-label="Reset manual order"
+                  onChange={(e) => { if (e.target.value) resetOrder(e.target.value as "author" | "title"); }}>
+            <option value="">Reset order…</option>
+            <option value="author">to Author</option>
+            <option value="title">to Title</option>
+          </select>
+        )}
+        <label className="flex items-center gap-1.5 text-xs text-ink-soft cursor-pointer select-none">
+          <input type="checkbox" checked={grouped} onChange={(e) => update({ ...prefs, group: e.target.checked })} />
+          Group by series
+        </label>
       </div>
+
+      {sort === "manual" && deviceBooks.length > 0 && (
+        <p className="text-xs text-ink-faint mb-2">Drag {grouped ? "series" : "books"} to arrange · {"☆"} pins to the top.</p>
+      )}
 
       {deviceBooks.length === 0 && (
         <div className="rounded-xl border border-dashed border-line-strong bg-paper-card p-6 text-center mb-5">
@@ -140,56 +363,39 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
         </div>
       )}
 
-      {sections.map((series) => {
-        const list = (groups.get(series) || []).slice().sort(cardOrder);
-        return (
-          <div key={series || "_none"} className="mb-5">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
-                {series || "Not in a series"}
-              </span>
-              <span className="text-xs text-ink-faint tabular-nums">{list.length}</span>
+      {grouped ? (
+        seriesIds.map((series) => {
+          const list = (groups.get(series) || []).slice().sort(cardOrder);
+          const draggable = sort === "manual";
+          //the whole block is the drag unit: grab it anywhere, drop it onto another block to reorder
+          return (
+            <div key={series || "_none"} ref={registerFlip(series)}
+                 draggable={draggable || undefined}
+                 onDragStart={draggable ? (e) => { setDragId(series); e.dataTransfer.effectAllowed = "move"; } : undefined}
+                 onDragEnd={draggable ? clearDrag : undefined}
+                 onDragOver={draggable ? (e) => { e.preventDefault(); dragOver(e, seriesIds, series); } : undefined}
+                 onDrop={draggable ? (e) => { e.preventDefault(); dropOn(e, seriesIds, series); } : undefined}
+                 className={`mb-6 rounded-xl border border-line p-4 transition ${draggable ? "cursor-move" : ""} ${
+                   dragId === series ? "opacity-40 ring-2 ring-accent-ring ring-offset-2 ring-offset-paper" : ""}`}>
+              <div className="flex items-center gap-2 mb-2">
+                {draggable && <span className="text-ink-faint select-none leading-none" aria-hidden title="Drag to reorder">⠿</span>}
+                {pinToggle(series, prefs.pinSeries.includes(series))}
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
+                  {series || "Not in a series"}
+                </span>
+                <span className="text-xs text-ink-faint tabular-nums">{list.length}</span>
+              </div>
+              <div className={gridClass}>
+                {list.map((b) => renderCard(b, false, false))}
+              </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 items-start gap-2.5">
-              {list.map((b) => (
-                <div key={b.book_id}
-                     className={`relative w-full rounded-xl border border-line bg-paper-card p-3 shadow-card transition hover:shadow-pop hover:border-accent-ring cursor-pointer ${
-                       b.started ? "" : "opacity-65 hover:opacity-100"}`}>
-                  <button className="group flex w-full items-start gap-2.5 text-left"
-                          onClick={() => (b.started ? open(b) : adopt(b.book_id))}>
-                    <Cover src={b.cover} title={b.title} />
-                    <span className="min-w-0 flex-1">
-                      <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
-                      {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
-                    </span>
-                  </button>
-                  {b.started ? (
-                    <>
-                      {(b.profiles?.length ?? 0) >= 1 && (
-                        <label className="mt-2 block">
-                          <span className="block text-[10px] uppercase tracking-wide text-ink-faint mb-0.5">Profile</span>
-                          {profileDropdown(b)}
-                        </label>
-                      )}
-                      {b.series && (
-                        <div className="mt-2 pt-2 border-t border-line">
-                          <span className="block text-xs text-ink-soft">{b.series} · #{(b.series_index ?? 0) + 1}</span>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="mt-2 pt-2 border-t border-line">
-                      <button className="text-xs font-medium text-accent-hover hover:underline transition"
-                              onClick={() => adopt(b.book_id)}>+ start contexts</button>
-                      {b.series && <span className="block text-xs text-ink-soft mt-1">{b.series} · #{(b.series_index ?? 0) + 1}</span>}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })
+      ) : (
+        <div className={`${gridClass} mb-5`}>
+          {bookIds.map((id) => renderCard(byId.get(id)!, sort === "manual", true))}
+        </div>
+      )}
 
       {/* standalone imported context files (web-only, e.g. shared by other users) */}
       <div className="mt-8 pt-5 border-t border-line">

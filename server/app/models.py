@@ -63,6 +63,15 @@ class DevicePosition(SQLModel, table=True):
     chapter_frac: float | None = None    #0..1 fraction through that chapter, for re-anchoring on the web
     updated: int = 0                     #unix seconds of the last sync from this device
 
+#per-user web UI preferences (home page sort/grouping/manual order/pins). stored server-side as a JSON
+#blob so the layout follows the account across browsers/devices instead of living in one browser's cache.
+class UserPref(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", name="uq_userpref_user"),)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True, unique=True)
+    home_json: str = "{}"     #the home-page view preferences object
+    updated: int = 0
+
 #a book known to be on the koreader device (from its read history) that may not have a contexts doc yet.
 #lets the web ui offer "start a context for a book you haven't taken notes on".
 class LibraryEntry(SQLModel, table=True):

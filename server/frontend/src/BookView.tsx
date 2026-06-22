@@ -176,6 +176,16 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
     },
     deleteContext: (key) => { mutate((d) => dq.deleteContext(d, key)); setSelected(null); },
     setType: (key, type) => { mutate((d) => dq.setType(d, key, type)); },
+    addAlias: (key, text) => {
+      if (!doc) return "No document.";
+      const next = structuredClone(doc) as Doc;
+      const err = dq.addAlias(next, key, text);
+      if (err) return err;            //rejected (e.g. name already in use): don't apply
+      pushHistory(doc);
+      void applyReplace(next);
+      return null;
+    },
+    deleteAlias: (key, index) => { mutate((d) => dq.deleteAlias(d, key, index)); },
     deletePoint: (key, ref) => { mutate((d) => dq.deletePoint(d, key, ref)); },
     createLink: (from, to, label, directed) => { mutate((d) => dq.createLink(d, from, to, label, directed)); },
     editLinkLabel: (id, label) => { mutate((d) => dq.editLinkLabel(d, id, label)); },
@@ -352,7 +362,7 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
                       onAddRelationship={ops.createLink} canAdd={hasTimeline} />
             </div>
             <div className="w-[300px] shrink-0 h-full overflow-auto">
-              <DetailPanel doc={doc} selected={selected} scrub={scrub} typeColors={typeColors} onAddPoint={addPoint} onEditPoint={editPoint} onClose={() => setSelected(null)} />
+              <DetailPanel doc={doc} selected={selected} scrub={scrub} typeColors={typeColors} ops={ops} onAddPoint={addPoint} onEditPoint={editPoint} onClose={() => setSelected(null)} />
             </div>
           </div>
         )}

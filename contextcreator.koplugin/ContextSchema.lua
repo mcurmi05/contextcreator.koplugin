@@ -10,7 +10,9 @@ doc shape:
     schema = 3,
     book = { id, title, authors, toc = { { title, progress }, ... } },  -- toc: chapter bands for the webapp timeline
     updated = <epoch>,                                  -- file-level last change, for cheap sync checks
-    contexts = { [key] = { title, type, points, updated, progress, chapter } },  -- key = normalizeWord(title)
+    contexts = { [key] = { title, type, points, updated, progress, chapter, aliases } },  -- key = normalizeWord(title)
+    -- aliases (optional) is a list of extra display names a highlighted word can match to this context
+    -- (e.g. "Albus Dumbledore" / "Professor Dumbledore" all resolving to the "Dumbledore" context)
     -- a point is { id, text, pos, progress, chapter }. id is a stable per-point id so the additive sync
     -- merge can union points by id (editing text mints a NEW id + tombstones the old, so concurrent edits
     -- duplicate instead of clobbering). pos is where in the book it was noted (a CRE xpointer string / a
@@ -202,6 +204,51 @@ function ContextSchema.deleteNode(doc, key)
             table.remove(doc.relationships, i)
         end
     end
+end
+
+--copy a list of points, giving each a brand new id and tombstoning the original. used when a
+--context moves to a new key (rename/promote): the new key gets fresh-id points so the additive sync
+--merge can empty out the OLD key (its original points become tombstoned) and then honour the old
+--key's context tombstone, instead of the old context lingering on the server and duplicating.
+function ContextSchema.reidPoints(doc, points)
+    local out = {}
+    for _, p in ipairs(points or {}) do
+        ContextSchema.tombstonePoint(doc, p)
+        local anchor = (type(p) == "table") and { pos = p.pos, progress = p.progress, chapter = p.chapter } or {}
+        out[#out + 1] = ContextSchema.newPoint(ContextSchema.pointText(p), anchor)
+    end
+    return out
+end
+
+--move a context to a new key with a new title, carrying its points (re-id'd) and relationships.
+--the old key is tombstoned. mirrors how a delete tombstones points, so the old context fully
+--disappears on sync rather than surviving (with its old points) as a duplicate of the new one.
+function ContextSchema.moveNode(doc, old_key, new_key, new_title)
+    local node = doc.contexts[old_key]
+    if not node then return end
+    node.points = ContextSchema.reidPoints(doc, node.points)
+    node.title = new_title
+    node.updated = ContextSchema.now()
+    doc.contexts[new_key] = node
+    ContextSchema.repointRelationships(doc, old_key, new_key)
+    doc.contexts[old_key] = nil
+    doc.tombstones.contexts[old_key] = ContextSchema.now()
+    doc.tombstones.contexts[new_key] = nil
+end
+
+--merge a context's points into an existing target context, then tombstone the old key.
+--the moved points are re-id'd so the old key empties out on sync (no lingering duplicate).
+function ContextSchema.mergeNodeInto(doc, old_key, target_key)
+    local node = doc.contexts[old_key]
+    local target = doc.contexts[target_key]
+    if not node or not target then return end
+    for _, p in ipairs(ContextSchema.reidPoints(doc, node.points)) do
+        table.insert(target.points, p)
+    end
+    target.updated = ContextSchema.now()
+    ContextSchema.repointRelationships(doc, old_key, target_key)
+    doc.contexts[old_key] = nil
+    doc.tombstones.contexts[old_key] = ContextSchema.now()
 end
 
 --move every relationship endpoint from old_key to new_key (used when a rename changes the node id).
