@@ -498,15 +498,14 @@ function ContextView:showPointsList(key)
 
     --flank the bottom page-navigation bar: "All contexts" on the left, then this context's
     --relationships and "Add dot point" on the right
-    self:addFooterButton(menu, "left", T(_("\u{2190} All contexts for %1"), self.store:getBookTitle()), function()
+    self:addFooterButton(menu, "left", _("\u{2190}"), function()
         UIManager:close(menu)
         self:showAllContexts()
     end)
-    self:addFooterButton(menu, "right", _("\u{2194} Relationships"), function()
-        UIManager:close(menu)
-        self:showRelationships(key)
+    self:addFooterButton(menu, "right", _("\u{2194}"), function()
+        self:showRelationships(key, menu)
     end)
-    self:addFooterButton(menu, "right", _("\u{FF0B} Add dot point"), function()
+    self:addFooterButton(menu, "right", _("\u{FF0B}"), function()
         UIManager:close(menu)
         self:editPoint(key, node.title, nil)
     end)
@@ -768,9 +767,8 @@ function ContextView:showAllContexts()
 
     --a "Relationships" shortcut on the bottom bar once any links exist, opening the book-wide list
     if #doc.relationships > 0 then
-        self:addFooterButton(menu, "right", T(_("\u{2194} Relationships (%1)"), #doc.relationships), function()
-            UIManager:close(menu)
-            self:showRelationships(nil)
+        self:addFooterButton(menu, "right", T(_("\u{2194} (%1)"), #doc.relationships), function()
+            self:showRelationships(nil, menu)
         end)
     end
 
@@ -876,8 +874,7 @@ function ContextView:showNodeActions(menu, key)
                 text = _("Relationships"),
                 callback = function()
                     UIManager:close(dialog)
-                    UIManager:close(menu)
-                    self:showRelationships(key)
+                    self:showRelationships(key, menu)
                 end,
             }},
             {{
@@ -1138,7 +1135,7 @@ function ContextView:askDirection(label, a_key, b_key, on_pick)
 end
 
 --list relationships. key == nil lists every link in the book, otherwise only those touching that node.
-function ContextView:showRelationships(key)
+function ContextView:showRelationships(key, parent_menu)
     local doc = self.store:load()
     local items = {}
     for _, rel in ipairs(doc.relationships) do
@@ -1152,12 +1149,16 @@ function ContextView:showRelationships(key)
     end
 
     if #items == 0 then
+        --nothing to list: pop the reminder but leave the calling window open behind it
         UIManager:show(InfoMessage:new{
             text = key and _("No relationships for this context yet.\nLong press it and choose \"Link to\u{2026}\" to add one.")
                 or _("No relationships in this book yet.\n\nLong-press a context and choose \"Link to\u{2026}\" to add one."),
         })
         return
     end
+
+    --only now that there's a list to show do we close the window we came from
+    if parent_menu then UIManager:close(parent_menu) end
 
     table.sort(items, function(a, b) return a.text:lower() < b.text:lower() end)
 
