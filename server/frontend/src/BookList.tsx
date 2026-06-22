@@ -83,6 +83,9 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
   const [prefs, setPrefs] = useState<HomePrefs>(DEFAULT_PREFS); //home layout (sort/group/order/pins), server-stored
   const [dragId, setDragId] = useState<string | null>(null);       //unit being dragged in manual mode
   const [preview, setPreview] = useState<string[] | null>(null);   //live reordered ids while dragging
+  const [editMeta, setEditMeta] = useState<string | null>(null);   //book_id whose series is being edited
+  const [seriesDraft, setSeriesDraft] = useState("");
+  const [idxDraft, setIdxDraft] = useState("");                     //1-based position as the user sees it
 
   useEffect(() => { void fetchHomePrefs().then(setPrefs); }, []);
   //change prefs optimistically and persist to the server
@@ -93,6 +96,24 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
   function togglePin(id: string) {
     const pins = pinsFor(prefs, grouped);
     update(withPins(prefs, grouped, pins.includes(id) ? pins.filter((x) => x !== id) : [...pins, id]));
+  }
+
+  //manually fix a book's series name / position when koreader's metadata is wrong (idxDraft is 1-based)
+  function startEditMeta(b: BookSummary) {
+    setEditMeta(b.book_id);
+    setSeriesDraft(b.series || "");
+    setIdxDraft(String((b.series_index ?? 0) + 1));
+  }
+  async function saveMeta(bookId: string) {
+    const n = parseInt(idxDraft, 10);
+    const series_index = Number.isFinite(n) && n > 0 ? n - 1 : 0; //store 0-based
+    setEditMeta(null);
+    try {
+      await api(`/api/books/${encodeURIComponent(bookId)}/meta`, {
+        method: "PATCH", body: JSON.stringify({ series: seriesDraft.trim(), series_index }),
+      });
+      await load();
+    } catch (e) { setError((e as Error).message); }
   }
   //where the dragged id should sit relative to the unit under the pointer. the side is decided by the
   //pointer vs the target's midpoint (geometry, so it doesn't flip-flop as items reflow): for vertical
@@ -202,8 +223,9 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
     : [];
   const deviceBooks: DeviceCard[] = [...startedBooks, ...libraryCards];
 
-  //within a series, started (annotated) books first, then the "start contexts" ones, by reading order
-  const cardOrder = (a: DeviceCard, b: DeviceCard) => Number(b.started) - Number(a.started) || byOrder(a, b);
+  //within a series, sort by series position (then title) so editing an index reorders the books; a
+  //started/unstarted split only breaks ties
+  const cardOrder = (a: DeviceCard, b: DeviceCard) => byOrder(a, b) || Number(b.started) - Number(a.started);
   const titleKey = (b: DeviceCard) => (b.title || b.book_id).toLowerCase();
   const authorKey = (b: DeviceCard) => (b.authors || "").toLowerCase();
   const pinFirst = (ids: string[], pins: string[]) => {
@@ -276,16 +298,41 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
     </button>
   );
 
+  //the series line: click it to hand-edit (covers the "koreader got the index wrong" case)
+  const seriesRow = (b: DeviceCard) => (
+    <button className="block w-full text-left text-xs text-ink-soft truncate hover:text-accent-hover transition"
+            title="Click to edit series" onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); startEditMeta(b); }}>
+      {b.series ? `${b.series} · #${(b.series_index ?? 0) + 1}` : <span className="text-ink-faint italic">no series — set one</span>}
+    </button>
+  );
+  const ed = "w-full px-1.5 py-1 rounded-md border border-line bg-paper-card text-xs focus:outline-none focus:border-accent-ring";
+  const seriesEditor = (b: DeviceCard) => (
+    <div className="mt-2 pt-2 border-t border-line space-y-1.5" onPointerDown={(e) => e.stopPropagation()}>
+      <input className={ed} placeholder="series name (blank to clear)" value={seriesDraft} onChange={(e) => setSeriesDraft(e.target.value)} />
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-ink-faint">#</span>
+        <input type="number" min={1} className={`${ed} w-16`} value={idxDraft} onChange={(e) => setIdxDraft(e.target.value)} />
+        <span className="flex-1" />
+        <button className="text-xs text-ink-soft hover:text-ink" onClick={(e) => { e.stopPropagation(); setEditMeta(null); }}>Cancel</button>
+        <button className="text-xs font-semibold text-accent-hover hover:underline" onClick={(e) => { e.stopPropagation(); void saveMeta(b.book_id); }}>Save</button>
+      </div>
+    </div>
+  );
+
   //a single book card. draggable (manual flat mode) and pinnable only when the book itself is the unit.
-  const renderCard = (b: DeviceCard, draggable: boolean, pinnable: boolean) => (
+  //dragging is suspended while its series is being edited so the inputs work normally.
+  const renderCard = (b: DeviceCard, draggable: boolean, pinnable: boolean) => {
+    const canDrag = draggable && editMeta !== b.book_id;
+    return (
     <div key={b.book_id} ref={registerFlip(b.book_id)}
-         draggable={draggable || undefined}
-         onDragStart={draggable ? (e) => { setDragId(b.book_id); e.dataTransfer.effectAllowed = "move"; } : undefined}
-         onDragEnd={draggable ? clearDrag : undefined}
-         onDragOver={draggable ? (e) => { e.preventDefault(); dragOver(e, bookIds, b.book_id); } : undefined}
-         onDrop={draggable ? (e) => { e.preventDefault(); dropOn(e, bookIds, b.book_id); } : undefined}
+         draggable={canDrag || undefined}
+         onDragStart={canDrag ? (e) => { setDragId(b.book_id); e.dataTransfer.effectAllowed = "move"; } : undefined}
+         onDragEnd={canDrag ? clearDrag : undefined}
+         onDragOver={canDrag ? (e) => { e.preventDefault(); dragOver(e, bookIds, b.book_id); } : undefined}
+         onDrop={canDrag ? (e) => { e.preventDefault(); dropOn(e, bookIds, b.book_id); } : undefined}
          className={`group/card relative w-full rounded-xl border border-line bg-paper-card p-3 shadow-card transition hover:shadow-pop hover:border-accent-ring ${
-           draggable ? "cursor-move" : "cursor-pointer"} ${dragId === b.book_id ? "opacity-40 ring-2 ring-accent-ring" : ""} ${b.started ? "" : "opacity-65 hover:opacity-100"}`}>
+           canDrag ? "cursor-move" : "cursor-pointer"} ${dragId === b.book_id ? "opacity-40 ring-2 ring-accent-ring" : ""} ${b.started ? "" : "opacity-65 hover:opacity-100"}`}>
       {pinnable && <div className="absolute top-1 right-1 z-10">{pinToggle(b.book_id, prefs.pinBooks.includes(b.book_id))}</div>}
       <button className="group flex w-full items-start gap-2.5 text-left"
               onClick={() => (b.started ? open(b) : adopt(b.book_id))}>
@@ -295,7 +342,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
           {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
         </span>
       </button>
-      {b.started ? (
+      {editMeta === b.book_id ? seriesEditor(b) : b.started ? (
         <>
           {(b.profiles?.length ?? 0) >= 1 && (
             <label className="mt-2 block">
@@ -303,21 +350,18 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
               {profileDropdown(b)}
             </label>
           )}
-          {b.series && (
-            <div className="mt-2 pt-2 border-t border-line">
-              <span className="block text-xs text-ink-soft">{b.series} · #{(b.series_index ?? 0) + 1}</span>
-            </div>
-          )}
+          <div className="mt-2 pt-2 border-t border-line">{seriesRow(b)}</div>
         </>
       ) : (
         <div className="mt-2 pt-2 border-t border-line">
           <button className="text-xs font-medium text-accent-hover hover:underline transition"
                   onClick={() => adopt(b.book_id)}>+ start contexts</button>
-          {b.series && <span className="block text-xs text-ink-soft mt-1">{b.series} · #{(b.series_index ?? 0) + 1}</span>}
+          <div className="mt-1">{seriesRow(b)}</div>
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   if (!books) return <p className="text-ink-faint">Loading…</p>;
 

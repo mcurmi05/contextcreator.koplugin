@@ -2,6 +2,7 @@
 #profiles (alternate context documents); endpoints that touch notes take a ?profile= query param (default
 #"default"). book-level metadata (title/series) and the shared reading position live on the Book itself.
 import json
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -41,6 +42,11 @@ class ProfileIn(BaseModel):
 
 class ProfileRename(BaseModel):
     name: str
+
+
+class BookMeta(BaseModel):
+    series: str | None = None       #grouping name; "" clears it
+    series_index: int | None = None  #0-based position (the home page shows it +1)
 
 
 def _get_row(session, user, book_id) -> Book:
@@ -177,6 +183,28 @@ def replace_book(book_id: str, body: dict, profile: str = DEFAULT_PID, user: Use
     book, prof, _ = profiles.replace_profile(session, user.id, book_id, body or {}, profile_id=profile)
     session.commit()
     return profiles.compose(book, prof)
+
+
+@router.patch("/books/{book_id}/meta")
+def update_book_meta(book_id: str, body: BookMeta, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #let the user fix a book's series name / position by hand when koreader's metadata is wrong or missing.
+    #for a started book the device won't clobber a web-set series, so the edit sticks; for an unstarted
+    #library entry it can be overwritten by a later device catalog push (its series comes from metadata).
+    book = session.exec(select(Book).where(Book.user_id == user.id, Book.book_id == book_id)).first()
+    row = book or session.exec(
+        select(LibraryEntry).where(LibraryEntry.user_id == user.id, LibraryEntry.book_id == book_id)
+    ).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="book not found")
+    if body.series is not None:
+        row.series = body.series.strip()
+    if body.series_index is not None:
+        row.series_index = max(0, int(body.series_index))
+    if book:
+        book.updated = int(time.time())
+    session.add(row)
+    session.commit()
+    return {"series": row.series, "series_index": row.series_index}
 
 
 @router.get("/export")
