@@ -16,6 +16,7 @@ local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 local T = require("ffi/util").template
+local logger = require("logger")
 local ContextSyncClient = require("ContextSyncClient")
 
 --how long after the last change before we actually push (coalesces a burst of edits into one sync)
@@ -221,7 +222,7 @@ end
 --has none of these covers yet, so pointing the device at it must re-extract and re-send everything even
 --though the same books were already sent to a different server. each scope keeps its own tried-set, so
 --switching servers back and forth doesn't lose progress either.
-local EXTRACT_SCHEMA = 2
+local EXTRACT_SCHEMA = 3
 
 --the key identifying the current server+account the tried-set belongs to
 function ContextSync:coversScope()
@@ -288,37 +289,40 @@ function ContextSync:extractBookInfo(file)
             series = props.series,
             series_index = webSeriesIndex(props.series_index),
         }
-        local bb = BookInfo:getCoverImage(doc) --reuse the already-open document
-        local scaled
-        if bb then
+        --cover extraction is the fragile part (image decode/scale/jpeg-encode all vary by device + book
+        --format), so keep it in its own pcall: a failure here must not throw away the title/series/author
+        --we already have, otherwise a book whose cover step errors would show up with no metadata at all.
+        --each step logs why it bailed so the device log shows what broke when a cover doesnt come through.
+        local cok, cerr = pcall(function()
+            local bb = BookInfo:getCoverImage(doc) --reuse the already-open document
+            if not bb then logger.dbg("ContextCreator: no cover image for", file); return end
             local RenderImage = require("ui/renderimage")
             local w, h = bb:getWidth(), bb:getHeight()
             local scale = math.min(COVER_W / w, COVER_H / h, 1)
             local nw = math.max(1, math.floor(w * scale))
             local nh = math.max(1, math.floor(h * scale))
-            scaled = RenderImage:scaleBlitBuffer(bb, nw, nh, true) --frees the original bb
-        end
-        doc:close() --done with the document; the scaled buffer is independent memory
-        if scaled then
+            local scaled = RenderImage:scaleBlitBuffer(bb, nw, nh, true) --frees the original bb
+            if not scaled then logger.warn("ContextCreator: cover scale failed for", file); return end
             local DataStorage = require("datastorage")
             local tmp = DataStorage:getDataDir() .. "/cc_cover_tmp.jpg"
             local wrote = scaled:writeToFile(tmp, "jpg", 80)
             scaled:free()
-            if wrote then
-                local f = io.open(tmp, "rb")
-                if f then
-                    local data = f:read("*a")
-                    f:close()
-                    os.remove(tmp)
-                    if data and data ~= "" then
-                        local mime = require("mime")
-                        result.cover = "data:image/jpeg;base64," .. (mime.b64(data))
-                    end
-                end
+            if not wrote then logger.warn("ContextCreator: cover writeToFile failed for", file); return end
+            local f = io.open(tmp, "rb")
+            if not f then return end
+            local data = f:read("*a")
+            f:close()
+            os.remove(tmp)
+            if data and data ~= "" then
+                local mime = require("mime")
+                result.cover = "data:image/jpeg;base64," .. (mime.b64(data))
             end
-        end
+        end)
+        if not cok then logger.warn("ContextCreator: cover extraction error for", file, "->", tostring(cerr)) end
+        doc:close() --done with the document; the scaled buffer is already independent memory
         return result
     end)
+    if not ok then logger.warn("ContextCreator: extractBookInfo failed for", file, "->", tostring(info)) end
     return ok and info or nil
 end
 
@@ -367,7 +371,11 @@ function ContextSync:buildLibraryAll()
         end
         out[#out + 1] = { book_id = md5, title = title or "", authors = authors or "",
                           series = series or "", series_index = webSeriesIndex(series_index), file = path }
-    end, true, 5000) --recursive, bound the walk so a huge tree can't run away
+    --recursive, with a high file ceiling so the walk can't run away. this counts every file visited,
+    --not just books: each opened book carries a .sdr sidecar folder of several files, so a real library
+    --inflates the count fast. keep it well above any plausible book count so the scan isnt cut short
+    --before it reaches them all (the real bound is the 500-book cap above).
+    end, true, 50000)
     return out
 end
 
@@ -380,16 +388,26 @@ function ContextSync:_pushCatalog(books)
     if NetworkMgr and NetworkMgr.isConnected and not NetworkMgr:isConnected() then return end --drain resumes later
     if #books == 0 then return end
     local tried = self:coversTried()
-    local budget = 6 --opening documents is heavy; only extract a few new covers per run
+    --per-session state (this ContextSync instance lives for one book-open): book_ids we've already opened
+    --this run, so a document is never reopened twice even while re-sending; and the covers the server last
+    --told us it's still missing, so a wiped/restored server gets them re-sent despite our local tried memory.
+    self._extracted = self._extracted or {}
+    self._need_cover = self._need_cover or {}
+    local budget = 6 --opening documents is heavy; only extract a few covers per run
     local fresh = {} --book_ids attempted this run, marked tried once the push lands
-    local remaining = 0 --untried books we didn't get to this run (drives the drain reschedule below)
+    local remaining = 0 --extractable books we didn't get to this run (drives the drain reschedule below)
     local payload = {}
     for _, b in ipairs(books) do
         local item = { book_id = b.book_id, title = b.title, authors = b.authors,
                        series = b.series, series_index = b.series_index }
-        if b.file and not tried[b.book_id] then
+        --extract when we have the file, haven't opened it yet this run, and either we've never tried it or
+        --the server says it still lacks the cover (the latter is what repopulates a freshly wiped server).
+        local want = b.file and not self._extracted[b.book_id]
+            and (not tried[b.book_id] or self._need_cover[b.book_id])
+        if want then
             if budget > 0 then
                 budget = budget - 1
+                self._extracted[b.book_id] = true --opened this run, never reopen it again this session
                 local info = self:extractBookInfo(b.file)
                 if info then
                     --the document's own metadata is authoritative; fill in anything we only had a filename
@@ -413,9 +431,24 @@ function ContextSync:_pushCatalog(books)
     local ok, resp = ContextSyncClient:new(s.server, s.username, s.password):pushLibrary(payload)
     if not ok and resp == 401 then self:authFailed() end
     if ok and #fresh > 0 then self:markCoversTried(fresh) end
-    --keep draining the cover backlog in small batches instead of waiting for the next app start, so a
-    --whole library fills within a minute or so. only chains while there's more to do, and on success.
-    if ok and remaining > 0 then
+    --adopt the server's list of covers it's still missing, so the next drain pass re-sends those. this is
+    --what lets a wiped/restored server refill even though we already extracted these once for it before.
+    if ok and type(resp) == "table" then
+        local nc = {}
+        if type(resp.need_cover) == "table" then
+            for _, id in ipairs(resp.need_cover) do nc[id] = true end
+        end
+        self._need_cover = nc
+    end
+    --keep draining in small batches: while budget-deferred books remain, or the server still wants a cover
+    --we can supply (have a file for, not yet opened this run). only chains on a successful push.
+    local more = remaining > 0
+    if ok and not more then
+        for _, b in ipairs(books) do
+            if b.file and self._need_cover[b.book_id] and not self._extracted[b.book_id] then more = true; break end
+        end
+    end
+    if ok and more then
         if self._cover_drain then UIManager:unschedule(self._cover_drain) end
         self._cover_drain = function() self._cover_drain = nil; self:_pushCatalog(books) end
         UIManager:scheduleIn(COVER_DRAIN_SECONDS, self._cover_drain)
@@ -427,6 +460,20 @@ function ContextSync:syncLibrary()
     if not self:isConfigured() then return end
     if NetworkMgr and NetworkMgr.isConnected and not NetworkMgr:isConnected() then return end
     self:_pushCatalog(self:buildLibrary())
+end
+
+--whether the once-per-app-session full library scan has already run. a reader plugin re-inits on every
+--book open, but the full folder walk is heavy, so we only do it once per process (reset on koreader restart).
+local did_startup_full_sync = false
+
+--run the full "sync all books" once per app session, deferred so it never competes with opening a book.
+--this is what keeps the web library complete (incl. unopened books) without the user tapping anything, and
+--together with the server's need_cover reply it repopulates covers automatically after a server reset.
+function ContextSync:syncAllBooksOnStartup()
+    if did_startup_full_sync then return end
+    did_startup_full_sync = true
+    if not self:isConfigured() then return end
+    UIManager:scheduleIn(5, function() self:syncAllBooks(false) end)
 end
 
 --re-read and push one book's catalog entry right now. called when koreader reports its metadata or cover

@@ -47,6 +47,19 @@ def _migrate():
                 conn.exec_driver_sql("ALTER TABLE deviceposition ADD COLUMN chapter VARCHAR DEFAULT ''")
             if "chapter_frac" not in dp_cols:
                 conn.exec_driver_sql("ALTER TABLE deviceposition ADD COLUMN chapter_frac FLOAT")
+        #backfill covers onto started books that lost theirs before ensure_book learned to carry the cover
+        #over when a library book first gains contexts. only fills an empty cover from a matching library
+        #entry that actually has one, so it's idempotent and never clobbers a cover already set.
+        if le_cols:
+            conn.exec_driver_sql(
+                "UPDATE book SET cover = ("
+                "  SELECT le.cover FROM libraryentry le"
+                "  WHERE le.user_id = book.user_id AND le.book_id = book.book_id"
+                ") WHERE (book.cover IS NULL OR book.cover = '') AND EXISTS ("
+                "  SELECT 1 FROM libraryentry le"
+                "  WHERE le.user_id = book.user_id AND le.book_id = book.book_id AND le.cover != ''"
+                ")"
+            )
         conn.commit()
     _seed_default_profiles()
 

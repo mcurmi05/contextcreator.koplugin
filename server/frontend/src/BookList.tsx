@@ -64,12 +64,19 @@ function useFlip(orderKey: string) {
   return register;
 }
 
-//small cover thumbnail; covers are data: urls synced from the device. renders nothing when absent
-//(e.g. imported docs, or books whose cover the device hasn't extracted yet), leaving the card unchanged.
+//small cover thumbnail. covers are data: urls synced from the device; until one comes through (imported
+//docs, or a book the device hasnt extracted yet) we show the bundled placeholder instead of a gap, and
+//fall back to it too if a stored cover fails to decode. the error state is tracked in react (not by
+//mutating the img src) and is reset whenever src changes, so a cover that arrives on a later poll always
+//wins, the desync you get from imperatively reassigning img.src would otherwise pin it to the placeholder.
+const PLACEHOLDER_COVER = "/placeholder.jpg";
 function Cover({ src, title }: { src?: string; title?: string }) {
-  if (!src) return null;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [src]); //a freshly synced cover gets another chance to load
+  const showPlaceholder = !src || failed;
   return (
-    <img src={src} alt={title ? `${title} cover` : "cover"} loading="lazy"
+    <img src={showPlaceholder ? PLACEHOLDER_COVER : src} alt={title ? `${title} cover` : "cover"} loading="lazy"
+         onError={() => { if (src && !failed) setFailed(true); }}
          className="w-10 h-14 shrink-0 rounded object-cover border border-line bg-paper-sunk" />
   );
 }
@@ -303,7 +310,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
     <button className="block w-full text-left text-xs text-ink-soft truncate hover:text-accent-hover transition"
             title="Click to edit series" onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); startEditMeta(b); }}>
-      {b.series ? `${b.series} · #${(b.series_index ?? 0) + 1}` : <span className="text-ink-faint italic">no series — set one</span>}
+      {b.series ? `${b.series} · #${(b.series_index ?? 0) + 1}` : <span className="text-ink-faint italic">no series, click to set one</span>}
     </button>
   );
   const ed = "w-full px-1.5 py-1 rounded-md border border-line bg-paper-card text-xs focus:outline-none focus:border-accent-ring";

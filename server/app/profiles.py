@@ -8,7 +8,7 @@ import secrets
 from sqlmodel import select
 
 from . import docops
-from .models import Book, DevicePosition, Profile
+from .models import Book, DevicePosition, LibraryEntry, Profile
 from .sync import _normalize, merge, new_doc
 
 DEFAULT_PID = "default"
@@ -172,6 +172,22 @@ def ensure_book(session, user_id, book_id, *, title="", authors="", source="devi
     book = _book(session, user_id, book_id)
     if book is None:
         book = Book(user_id=user_id, book_id=book_id, title=title, authors=authors, source=source)
+        #a book sitting unstarted in the device library already has its cover (and series) resolved from
+        #the device catalog, stored on its LibraryEntry. the first time it gains contexts it becomes a Book
+        #and drops out of /library, so seed those over here, otherwise the cover the user was already
+        #seeing vanishes (the device only sends cover bytes once, so it'd never come back on its own).
+        entry = session.exec(
+            select(LibraryEntry).where(LibraryEntry.user_id == user_id, LibraryEntry.book_id == book_id)
+        ).first()
+        if entry:
+            book.cover = entry.cover or ""
+            if not (book.title or "").strip() and entry.title:
+                book.title = entry.title
+            if not (book.authors or "").strip() and entry.authors:
+                book.authors = entry.authors
+            if entry.series:
+                book.series = entry.series
+                book.series_index = entry.series_index
         session.add(book)
         session.flush()
     return book

@@ -39,6 +39,7 @@ def push_library(body: list[dict], user: User = Depends(get_sync_user), session:
     #the device reports its read-history catalog (book_id + title) so the web ui can offer to start a
     #context for a book that has no notes yet. upsert by book_id, scoped to the user.
     seen = 0
+    need_cover = []  #book_ids the server still has no cover for, so the device knows to (re)send one
     for it in body or []:
         bid = it.get("book_id")
         if not bid:
@@ -61,18 +62,23 @@ def push_library(body: list[dict], user: User = Depends(get_sync_user), session:
                 row.series = series
                 row.series_index = sidx
         else:
-            session.add(LibraryEntry(user_id=user.id, book_id=bid, title=it.get("title") or "",
-                                     authors=it.get("authors") or "", cover=cover, series=series, series_index=sidx))
+            row = LibraryEntry(user_id=user.id, book_id=bid, title=it.get("title") or "",
+                               authors=it.get("authors") or "", cover=cover, series=series, series_index=sidx)
+            session.add(row)
         #a book with notes lives as a Book (and is filtered out of /api/library), so push the cover there too.
         #a cover in the payload is always freshly extracted (first time or a changed one), so overwrite it.
-        if cover:
-            book = session.exec(
-                select(Book).where(Book.user_id == user.id, Book.book_id == bid)
-            ).first()
-            if book:
-                book.cover = cover
+        book = session.exec(
+            select(Book).where(Book.user_id == user.id, Book.book_id == bid)
+        ).first()
+        if cover and book:
+            book.cover = cover
+        #tell the device to (re)send a cover when we have none, on either the library entry or the started
+        #book. this makes covers self-heal after a server wipe/restore: the device's local "already sent"
+        #memory wouldn't otherwise re-send to the same url, but an empty server here asks for them again.
+        if not ((row.cover or "") or (book.cover if book else "")):
+            need_cover.append(bid)
     session.commit()
-    return {"ok": True, "count": seen}
+    return {"ok": True, "count": seen, "need_cover": need_cover}
 
 
 @router.get("/books/{book_id}")

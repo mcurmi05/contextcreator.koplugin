@@ -58,6 +58,9 @@ function ContextCreator:init()
         UIManager:scheduleIn(2, function() self.sync:syncProfiles() end)
         --report the device's book catalog so the web ui can start contexts for un-noted books
         UIManager:scheduleIn(3, function() self.sync:syncLibrary() end)
+        --once per app session, do a full library scan (covers + unopened books too), deferred a bit more so
+        --it doesn't compete with opening the book. self-guards against re-running on every book open.
+        self.sync:syncAllBooksOnStartup()
         self.sync:startPeriodic()
     end
 
