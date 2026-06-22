@@ -217,19 +217,46 @@ end
 --sync. the set is stamped with EXTRACT_SCHEMA: when what we pull out of a book changes (e.g. we started
 --reading metadata too, not just the cover), bumping the schema invalidates old marks so every book gets
 --re-extracted once on upgrade instead of being stuck with whatever the old code produced.
+--the set is also scoped per server+account: a fresh server (e.g. a new deployment with an empty db)
+--has none of these covers yet, so pointing the device at it must re-extract and re-send everything even
+--though the same books were already sent to a different server. each scope keeps its own tried-set, so
+--switching servers back and forth doesn't lose progress either.
 local EXTRACT_SCHEMA = 2
+
+--the key identifying the current server+account the tried-set belongs to
+function ContextSync:coversScope()
+    local s = self:settings()
+    return (s.server or "") .. "|" .. (s.username or "")
+end
+
+--the whole store as a per-scope map. the old format was a single flat table (with _schema and book_ids
+--at the top level), detect that by its top-level _schema and drop it so it migrates to a clean map (a
+--one-time re-extract on upgrade, which is fine).
+function ContextSync:allCoversTried()
+    local all = G_reader_settings:readSetting("contextcreator_covers_tried")
+    if type(all) ~= "table" or all._schema ~= nil then return {} end
+    return all
+end
+
 function ContextSync:coversTried()
-    local store = G_reader_settings:readSetting("contextcreator_covers_tried")
-    if type(store) ~= "table" or store._schema ~= EXTRACT_SCHEMA then
-        return { _schema = EXTRACT_SCHEMA } --old/missing: start fresh so the new extraction runs for all
+    local scope = self:allCoversTried()[self:coversScope()]
+    if type(scope) ~= "table" or scope._schema ~= EXTRACT_SCHEMA then
+        return { _schema = EXTRACT_SCHEMA } --new scope/schema/missing: start fresh so extraction runs for all
     end
-    return store
+    return scope
+end
+
+--persist the current scope's tried-set back into the per-scope map, leaving other scopes untouched
+function ContextSync:saveCoversTried(tried)
+    local all = self:allCoversTried()
+    all[self:coversScope()] = tried
+    G_reader_settings:saveSetting("contextcreator_covers_tried", all)
 end
 
 function ContextSync:markCoversTried(ids)
     local tried = self:coversTried()
     for _, id in ipairs(ids) do tried[id] = true end
-    G_reader_settings:saveSetting("contextcreator_covers_tried", tried)
+    self:saveCoversTried(tried)
 end
 
 --forget a book so its cover/metadata gets re-read next push (used when koreader says it just changed)
@@ -237,7 +264,7 @@ function ContextSync:forgetCoverTried(id)
     local tried = self:coversTried()
     if tried[id] then
         tried[id] = nil
-        G_reader_settings:saveSetting("contextcreator_covers_tried", tried)
+        self:saveCoversTried(tried)
     end
 end
 
