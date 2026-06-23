@@ -36,6 +36,7 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(ctx.title);
   const [note, setNote] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false); //toggle the add-dot-point form (mirrors "+ Add relationship")
   const [confirmDel, setConfirmDel] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customVal, setCustomVal] = useState("");
@@ -135,8 +136,12 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
               {(ctx.aliases || []).map((a, i) => (
                 <div key={i} className="flex items-center gap-1.5 group/al">
                   <span className="flex-1 min-w-0 truncate text-ink-faint">{a}</span>
+                  <button className="shrink-0 text-ink-faint hover:text-accent-hover transition opacity-60 group-hover/al:opacity-100"
+                          title="Make this the main name" aria-label="Make main name"
+                          onPointerDown={(e) => e.stopPropagation()} onClick={() => ops.promoteAlias(ckey, i)}>↑</button>
                   <button className="shrink-0 text-ink-faint hover:text-red-600 transition opacity-60 group-hover/al:opacity-100"
-                          title="Remove alias" aria-label="Remove alias" onClick={() => ops.deleteAlias(ckey, i)}>×</button>
+                          title="Remove alias" aria-label="Remove alias"
+                          onPointerDown={(e) => e.stopPropagation()} onClick={() => ops.deleteAlias(ckey, i)}>×</button>
                 </div>
               ))}
               <form onSubmit={(e) => { e.preventDefault(); submitAlias(); }} className="flex gap-1 pt-0.5">
@@ -153,14 +158,30 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
       )}
 
       <div className="flex-1 overflow-auto">
-        <ul className="px-4 py-2 space-y-1.5 text-sm">
-          {(ctx.points || []).map((p, i) => (
-            <PointItem key={i} text={pointText(p)} dim={(pointProgress(p) ?? -1) > scrub} editable
-                       onSave={(t) => onEditPoint(ckey, pointRef(p, i), t)}
-                       onDelete={() => ops.deletePoint(ckey, pointRef(p, i))} />
-          ))}
-          {(!ctx.points || ctx.points.length === 0) && <li className="text-ink-faint italic">no notes yet</li>}
-        </ul>
+        {/* dot points — added via a toggled inline form, exactly like the relationships section below */}
+        <div className="px-3 pt-2 pb-2">
+          <div className="flex items-center gap-1 mb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint flex-1">Dot points</span>
+            <button className="text-xs text-accent-hover hover:underline" onClick={() => setNoteOpen((v) => !v)}>{noteOpen ? "Cancel" : "+ Add dot point"}</button>
+          </div>
+          <ul className="space-y-1.5 text-sm">
+            {(ctx.points || []).map((p, i) => (
+              <PointItem key={i} text={pointText(p)} dim={(pointProgress(p) ?? -1) > scrub} editable
+                         onSave={(t) => onEditPoint(ckey, pointRef(p, i), t)}
+                         onDelete={() => ops.deletePoint(ckey, pointRef(p, i))} />
+            ))}
+            {(!ctx.points || ctx.points.length === 0) && !noteOpen && <li className="text-ink-faint italic">no dot points yet</li>}
+          </ul>
+          {noteOpen && (
+            <div className="mt-2 flex gap-1.5">
+              <input autoFocus className="flex-1 px-2 py-1 rounded-md border border-line bg-paper-card text-sm focus:outline-none focus:border-accent-ring"
+                     placeholder="dot point text…" value={note} onPointerDown={(e) => e.stopPropagation()}
+                     onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitNote()} />
+              <button className="px-2.5 py-1 rounded-md bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition disabled:opacity-50"
+                      disabled={!note.trim()} onClick={submitNote}>Add</button>
+            </div>
+          )}
+        </div>
 
         {/* relationships */}
         <div className="px-3 pb-2 pt-1 border-t border-line">
@@ -214,13 +235,6 @@ export function NodeCard({ ckey, ctx, contexts, relationships, typeColors, scrub
           )}
         </div>
       </div>
-
-      <div className="flex gap-1.5 p-2 border-t border-line bg-paper">
-        <input className="flex-1 px-2.5 py-1.5 rounded-lg border border-line bg-paper-card text-sm focus:outline-none focus:border-accent-ring focus:ring-2 focus:ring-accent-ring/30"
-               placeholder="add a note…" value={note}
-               onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitNote()} />
-        <button className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition" onClick={submitNote}>Add</button>
-      </div>
     </div>
   );
 }
@@ -233,6 +247,7 @@ export function RelCard({ rel, contexts, scrub, ops, onSelect, onDrag }: {
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState(rel.label || "");
   const [note, setNote] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false); //toggle the add-dot-point form
   const [confirmDel, setConfirmDel] = useState(false);
 
   const fromT = contexts[rel.from]?.title || rel.from;
@@ -267,14 +282,30 @@ export function RelCard({ rel, contexts, scrub, ops, onSelect, onDrag }: {
                 onClick={() => ops.setLinkDirection(rel.id, rel.to, rel.from, directed)}>⇄</button>
       </div>
 
-      <ul className="flex-1 overflow-auto px-4 py-2 space-y-1.5 text-sm">
-        {(rel.points || []).map((p, i) => (
-          <PointItem key={i} text={pointText(p)} dim={(pointProgress(p) ?? -1) > scrub} editable
-                     onSave={(t) => ops.editRelPoint(rel.id, pointRef(p, i), t)}
-                     onDelete={() => ops.deleteRelPoint(rel.id, pointRef(p, i))} />
-        ))}
-        {(!rel.points || rel.points.length === 0) && <li className="text-ink-faint italic">no notes on this relationship</li>}
-      </ul>
+      {/* dot points — added via a toggled inline form, the same style as adding a relationship */}
+      <div className="flex-1 overflow-auto px-3 pt-2 pb-2">
+        <div className="flex items-center gap-1 mb-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint flex-1">Dot points</span>
+          <button className="text-xs text-accent-hover hover:underline" onClick={() => setNoteOpen((v) => !v)}>{noteOpen ? "Cancel" : "+ Add dot point"}</button>
+        </div>
+        <ul className="space-y-1.5 text-sm">
+          {(rel.points || []).map((p, i) => (
+            <PointItem key={i} text={pointText(p)} dim={(pointProgress(p) ?? -1) > scrub} editable
+                       onSave={(t) => ops.editRelPoint(rel.id, pointRef(p, i), t)}
+                       onDelete={() => ops.deleteRelPoint(rel.id, pointRef(p, i))} />
+          ))}
+          {(!rel.points || rel.points.length === 0) && !noteOpen && <li className="text-ink-faint italic">no dot points on this relationship</li>}
+        </ul>
+        {noteOpen && (
+          <div className="mt-2 flex gap-1.5">
+            <input autoFocus className="flex-1 px-2 py-1 rounded-md border border-line bg-paper-card text-sm focus:outline-none focus:border-accent-ring"
+                   placeholder="dot point text…" value={note}
+                   onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitNote()} />
+            <button className="px-2.5 py-1 rounded-md bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition disabled:opacity-50"
+                    disabled={!note.trim()} onClick={submitNote}>Add</button>
+          </div>
+        )}
+      </div>
 
       {confirmDel ? (
         <div className="flex items-center gap-2 px-3 py-2 border-t border-line text-sm">
@@ -283,11 +314,7 @@ export function RelCard({ rel, contexts, scrub, ops, onSelect, onDrag }: {
           <button className="text-ink-soft hover:text-ink" onClick={() => setConfirmDel(false)}>Cancel</button>
         </div>
       ) : (
-        <div className="flex gap-1.5 p-2 border-t border-line bg-paper">
-          <input className="flex-1 px-2.5 py-1.5 rounded-lg border border-line bg-paper-card text-sm focus:outline-none focus:border-accent-ring focus:ring-2 focus:ring-accent-ring/30"
-                 placeholder="add a note…" value={note}
-                 onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitNote()} />
-          <button className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition" onClick={submitNote}>Add</button>
+        <div className="flex justify-end p-2 border-t border-line bg-paper">
           <button className="group/trash px-2 py-1.5 rounded-lg border border-line hover:bg-paper-sunk transition" title="Delete relationship" aria-label="Delete relationship" onClick={() => setConfirmDel(true)}>
             <TrashImg className="w-4 h-4" />
           </button>

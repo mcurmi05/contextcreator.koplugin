@@ -74,10 +74,14 @@ export default function App() {
   return (
     <div className="h-full flex flex-col">
       <header className="sticky top-0 z-30 flex items-center gap-2.5 px-5 h-14 border-b border-line bg-paper/85 backdrop-blur">
-        {theme.logo
-          ? <img src={theme.logo} alt="" className="h-7 w-7 rounded object-contain" />
-          : <Mark />}
-        <strong className="tracking-tight truncate">{theme.title || "Context Creator"}</strong>
+        <button onClick={() => { setBookId(null); setPhase("books"); }}
+                className="flex items-center gap-2.5 min-w-0 -mx-1 px-1 py-1 rounded-lg hover:bg-paper-sunk transition"
+                title="Home" aria-label="Home">
+          {theme.logo
+            ? <img src={theme.logo} alt="" className="h-7 w-7 rounded object-contain" />
+            : <Mark />}
+          <strong className="tracking-tight truncate">{theme.title || "Context Creator"}</strong>
+        </button>
         <span className="flex-1" />
         {me && <span className="text-ink-soft text-sm hidden sm:inline">{me.username}</span>}
         <button className={btnGhost} onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings"><Gear /></button>

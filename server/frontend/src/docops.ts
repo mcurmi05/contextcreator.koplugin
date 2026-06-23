@@ -208,6 +208,19 @@ export function deleteAlias(doc: Doc, key: string, index: number) {
   doc.updated = now();
 }
 
+//make an alias the context's main name: swap it with the current title (the old title becomes an alias so
+//it still matches), then rename the context to the alias. returns the new context key.
+export function promoteAlias(doc: Doc, key: string, index: number): string {
+  const ctx = doc.contexts[key];
+  if (!ctx || !ctx.aliases || index < 0 || index >= ctx.aliases.length) return key;
+  const newTitle = ctx.aliases[index];
+  const oldTitle = ctx.title;
+  //drop the promoted alias; keep the old title as an alias so the previous name keeps resolving here
+  const rest = ctx.aliases.filter((_, i) => i !== index);
+  ctx.aliases = oldTitle && normalizeWord(oldTitle) !== normalizeWord(newTitle) ? [...rest, oldTitle] : rest;
+  return renameContext(doc, key, newTitle);
+}
+
 export function deletePoint(doc: Doc, key: string, ref: PointRef) {
   const ctx = doc.contexts[key];
   if (!ctx) return;

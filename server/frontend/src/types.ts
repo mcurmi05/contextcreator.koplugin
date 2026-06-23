@@ -68,6 +68,7 @@ export interface GraphEditOps {
   setType: (key: string, type: string) => void;
   addAlias: (key: string, text: string) => string | null;  //returns an error message, or null on success
   deleteAlias: (key: string, index: number) => void;
+  promoteAlias: (key: string, index: number) => void;      //make an alias the main context name
   deletePoint: (key: string, ref: PointRef) => void;
   createLink: (from: string, to: string, label: string, directed: boolean) => void;
   editLinkLabel: (id: string, label: string) => void;

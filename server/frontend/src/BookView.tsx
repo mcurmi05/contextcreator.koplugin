@@ -38,6 +38,7 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   const [addRel, setAddRel] = useState<{ from: string; to: string; label: string; directed: boolean } | null>(null);
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null); //styled info dialog
   const [confirmClear, setConfirmClear] = useState(false); //"clear all notes" confirmation
+  const [confirmPromote, setConfirmPromote] = useState<{ key: string; index: number } | null>(null); //alias→main name confirm
 
   //every notes call is scoped to the active profile via ?profile=
   const bookUrl = useCallback(
@@ -193,6 +194,8 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
       return null;
     },
     deleteAlias: (key, index) => { mutate((d) => dq.deleteAlias(d, key, index)); },
+    //promoting is a destructive-ish rename, so confirm first; the actual swap runs in doPromoteAlias
+    promoteAlias: (key, index) => setConfirmPromote({ key, index }),
     deletePoint: (key, ref) => { mutate((d) => dq.deletePoint(d, key, ref)); },
     createLink: (from, to, label, directed) => { mutate((d) => dq.createLink(d, from, to, label, directed)); },
     editLinkLabel: (id, label) => { mutate((d) => dq.editLinkLabel(d, id, label)); },
@@ -273,6 +276,18 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
     await loadProfiles();
     if (id === profile) switchProfile(rest[0]?.profile_id || "default");
   }
+  //perform the confirmed alias→main-name swap: rename the context to the alias (old title kept as an alias)
+  function doPromoteAlias() {
+    const req = confirmPromote;
+    setConfirmPromote(null);
+    if (!doc || !req) return;
+    const next = structuredClone(doc) as Doc;
+    const newKey = dq.promoteAlias(next, req.key, req.index);
+    pushHistory(doc);
+    void applyReplace(next);
+    if (newKey !== req.key) setSelected({ kind: "context", id: newKey }); //follow the renamed node
+  }
+
   //empty the active profile's notes (tombstoned so the cleared state survives sync). undoable.
   function doClearProfile() {
     setConfirmClear(false);
@@ -431,6 +446,13 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
         <ConfirmDialog title="Clear all notes" danger confirmLabel="Clear notes"
                        onCancel={() => setConfirmClear(false)} onConfirm={doClearProfile}
                        message={<>Clear all notes in <strong>“{activeName}”</strong>? The contexts, links and points are all removed. You can undo this.</>} />
+      )}
+
+      {confirmPromote && doc.contexts[confirmPromote.key]?.aliases?.[confirmPromote.index] && (
+        <ConfirmDialog title="Make main name" confirmLabel="Make main name"
+                       onCancel={() => setConfirmPromote(null)} onConfirm={doPromoteAlias}
+                       message={<>Make <strong>“{doc.contexts[confirmPromote.key].aliases![confirmPromote.index]}”</strong> the main name
+                         for <strong>“{doc.contexts[confirmPromote.key].title}”</strong>? The current name becomes an alias. You can undo this.</>} />
       )}
     </div>
   );
