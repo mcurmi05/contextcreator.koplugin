@@ -20,8 +20,8 @@ function ago(updated: number): string {
 
 //narrative-progress scrubber (0..1 through the book). the filled portion is "what's happened so far";
 //chapter boundaries are faint ticks, the current chapter is banded, and the caption reads "<chapter> · NN%".
-export default function Timeline({ doc, devices = [], scrub, onScrub, onAddContext, onAddRelationship }: {
-  doc: Doc; devices?: DevicePosition[]; scrub: number; onScrub: (v: number) => void;
+export default function Timeline({ doc, devices = [], external = false, scrub, onScrub, onAddContext, onAddRelationship }: {
+  doc: Doc; devices?: DevicePosition[]; external?: boolean; scrub: number; onScrub: (v: number) => void;
   onAddContext?: () => void;       //when set, show an accent "Add context" button (graph view)
   onAddRelationship?: () => void;  //when set, show an "Add relationship" button next to it
 }) {
@@ -72,11 +72,12 @@ export default function Timeline({ doc, devices = [], scrub, onScrub, onAddConte
   }
 
   //one jump target per connected device (freshest first, as the server returns them). if none have
-  //synced a position, fall back to the doc's single shared reading position.
-  const targets: JumpTarget[] = devices
+  //synced a position, fall back to the doc's single shared reading position. imported (external) files
+  //aren't tied to any device/book, so there's nothing to "jump to current" for — skip targets entirely.
+  const targets: JumpTarget[] = external ? [] : devices
     .filter((d) => typeof d.reading_progress === "number")
     .map((d) => ({ id: d.device_id, name: d.device_name || "KOReader", rp: deviceRp(d), updated: d.updated }));
-  if (!targets.length && typeof doc.reading_progress === "number") {
+  if (!external && !targets.length && typeof doc.reading_progress === "number") {
     targets.push({ id: "_doc", name: null, rp: clamp01(doc.reading_progress), updated: 0 });
   }
 

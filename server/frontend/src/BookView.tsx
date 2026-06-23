@@ -5,7 +5,7 @@ import Browse from "./Browse";
 import Timeline from "./Timeline";
 import DetailPanel from "./DetailPanel";
 import ProfilePicker from "./ProfilePicker";
-import Modal from "./Modal";
+import Modal, { InfoDialog, ConfirmDialog } from "./Modal";
 import { btn, btnAccent, input } from "./ui";
 import { TYPE_LABELS } from "./model";
 import { loadTypeColors, saveTypeColors } from "./typeColors";
@@ -20,7 +20,8 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
 }) {
   const [doc, setDoc] = useState<Doc | null>(null);
   const [tab, setTab] = useState<"graph" | "browse">("graph");
-  const [scrub, setScrub] = useState(1); //0..1 narrative progress, 1 = show everything
+  const [scrub, setScrub] = useState(0); //0..1 narrative progress (1 = everything). starts at 0 so the
+                                         //timeline doesn't flash "show all" before the reading position loads
   const [selected, setSelected] = useState<Selected>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [typeColors, setTypeColors] = useState<Record<string, string>>(loadTypeColors);
@@ -35,6 +36,8 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   //styled add dialogs for the graph view (in place of window.prompt)
   const [addCtx, setAddCtx] = useState<{ name: string; type: string } | null>(null);
   const [addRel, setAddRel] = useState<{ from: string; to: string; label: string; directed: boolean } | null>(null);
+  const [notice, setNotice] = useState<{ title: string; message: string } | null>(null); //styled info dialog
+  const [confirmClear, setConfirmClear] = useState(false); //"clear all notes" confirmation
 
   //every notes call is scoped to the active profile via ?profile=
   const bookUrl = useCallback(
@@ -131,9 +134,13 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   //that spot in the story (matching how the device anchors to the reading position)
   async function addContext(title: string, type: string) {
     if (!doc?.book?.toc?.length) return;  //no timeline yet -> nowhere to anchor it, so block the add
+    const hadProfile = profiles.length > 0;
     await edit(() => api(bookUrl("/contexts"), {
       method: "POST", body: JSON.stringify({ title, type, progress: scrub }),
     }).then(() => {}));
+    //the first context on a freshly adopted book materialises its Main profile server-side; refresh the
+    //picker so it shows up
+    if (!hadProfile) void loadProfiles();
   }
   async function addPoint(key: string, text: string) {
     if (!doc?.book?.toc?.length) return;  //no timeline yet -> nowhere to anchor it, so block the add
@@ -267,9 +274,9 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
     if (id === profile) switchProfile(rest[0]?.profile_id || "default");
   }
   //empty the active profile's notes (tombstoned so the cleared state survives sync). undoable.
-  function clearProfile() {
+  function doClearProfile() {
+    setConfirmClear(false);
     if (!doc) return;
-    if (!confirm("Clear all notes in this profile? The contexts, links and points are removed (you can undo).")) return;
     mutate((d) => dq.clearAll(d));
     setSelected(null);
   }
@@ -277,8 +284,8 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   async function sendProfileToImported() {
     try {
       const r = await api<{ title: string }>(`/api/books/${encodeURIComponent(bookId)}/profiles/${encodeURIComponent(profile)}/to-external`, { method: "POST" });
-      alert(`Saved "${r.title}" to your Imported contexts on the Books screen.`);
-    } catch (e) { alert("Couldn't save: " + (e as Error).message); }
+      setNotice({ title: "Saved as standalone copy", message: `Saved “${r.title}” to your Imported contexts on the Books screen.` });
+    } catch (e) { setNotice({ title: "Couldn't save", message: (e as Error).message }); }
   }
 
   if (!doc) return <div className="h-full grid place-items-center text-ink-faint">Loading…</div>;
@@ -291,6 +298,8 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
   //imported) books can't be synced from koreader, so we don't nag about those.
   const hasTimeline = (doc.book?.toc || []).length > 0;
   const canSyncTimeline = doc.source !== "external";
+  //the active profile's name: from the loaded list, else the doc's (covers the not-yet-saved "Main")
+  const activeName = profiles.find((p) => p.profile_id === profile)?.name || doc.profile?.name || "Main";
   //contexts as relationship endpoints (for the "Add relationship" modal), by title
   const ctxList = Object.keys(doc.contexts || {})
     .map((k) => ({ k, title: doc.contexts[k]?.title || k }))
@@ -309,9 +318,9 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
           </p>
         </div>
         <span className="flex-1" />
-        <ProfilePicker profiles={profiles} activeId={profile}
+        <ProfilePicker profiles={profiles} activeId={profile} activeName={activeName}
                        onSwitch={switchProfile} onCreate={createProfile} onRename={renameProfile} onDelete={deleteProfile}
-                       onExportExternal={sendProfileToImported} onClear={clearProfile} />
+                       onExportExternal={sendProfileToImported} onClear={() => setConfirmClear(true)} />
         <button className={btn} onClick={undo} disabled={!undoStack.length} title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶</button>
         <button className={btn} onClick={redo} disabled={!redoStack.length} title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↷</button>
         <button className={btn} onClick={exportBook} title="Download this book's contexts">Export</button>
@@ -333,7 +342,7 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
 
       <div className="shrink-0">
         {hasTimeline || !canSyncTimeline ? (
-          <Timeline doc={doc} devices={devices} scrub={scrub} onScrub={setScrub}
+          <Timeline doc={doc} devices={devices} external={doc.source === "external"} scrub={scrub} onScrub={setScrub}
                     onAddContext={tab === "graph" && hasTimeline ? () => setAddCtx({ name: "", type: "unset" }) : undefined}
                     onAddRelationship={tab === "graph" && hasTimeline && Object.keys(doc.contexts || {}).length >= 2
                       ? () => setAddRel({ from: "", to: "", label: "", directed: true }) : undefined} />
@@ -414,6 +423,14 @@ export default function BookView({ bookId, onBack, graph, onGraphChange }: {
             </div>
           </form>
         </Modal>
+      )}
+
+      {notice && <InfoDialog title={notice.title} message={notice.message} onClose={() => setNotice(null)} />}
+
+      {confirmClear && (
+        <ConfirmDialog title="Clear all notes" danger confirmLabel="Clear notes"
+                       onCancel={() => setConfirmClear(false)} onConfirm={doClearProfile}
+                       message={<>Clear all notes in <strong>“{activeName}”</strong>? The contexts, links and points are all removed. You can undo this.</>} />
       )}
     </div>
   );

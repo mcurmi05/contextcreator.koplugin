@@ -14,6 +14,15 @@ from .sync import _normalize, merge, new_doc
 DEFAULT_PID = "default"
 
 
+def _without_cover(doc):
+    #the cover is a big data: url and is book-level; compose() re-overlays it from the Book on read, so we
+    #keep it out of the per-profile notes blob we persist (avoids bloating every profile's doc_json).
+    meta = doc.get("book")
+    if isinstance(meta, dict) and meta.get("cover"):
+        return {**doc, "book": {k: v for k, v in meta.items() if k != "cover"}}
+    return doc
+
+
 def record_device_position(session, user_id, book_id, device_id, reading_progress, *,
                            device_name=None, chapter=None, chapter_frac=None):
     #remember where one device has read up to, so the web can offer a per-device "jump to current".
@@ -104,7 +113,11 @@ def add_external_profile(session, user_id, book, doc, *, name):
     pid = gen_profile_id()
     pname = unique_profile_name(session, user_id, book.book_id, name)
     session.add(Profile(user_id=user_id, book_id=book.book_id, profile_id=pid, name=pname,
-                        doc_json=json.dumps(doc), updated=doc["updated"]))
+                        doc_json=json.dumps(_without_cover(doc)), updated=doc["updated"]))
+    #carry a cover over to a coverless external book, so an imported copy can supply the artwork
+    cover = (doc.get("book") or {}).get("cover")
+    if cover and not (book.cover or ""):
+        book.cover = cover
     book.updated = max(book.updated or 0, doc["updated"])
     return pid
 
@@ -119,12 +132,13 @@ def create_external_book(session, user_id, doc, *, title, authors, origin_id, pr
     book = Book(user_id=user_id, book_id=bid, source="external", origin_id=origin_id or bid,
                 title=title or meta.get("title") or "Imported contexts",
                 authors=authors or meta.get("authors") or "",
+                cover=meta.get("cover") or "",  #cover travels embedded in the doc, no upload needed
                 toc_json=json.dumps(toc) if isinstance(toc, list) and toc else "[]",
                 reading_progress=doc.get("reading_progress"), updated=doc["updated"])
     session.add(book)
     session.add(Profile(user_id=user_id, book_id=bid, profile_id=DEFAULT_PID,
                         name=(profile_name or "Main").strip() or "Main",
-                        doc_json=json.dumps(doc), updated=doc["updated"]))
+                        doc_json=json.dumps(_without_cover(doc)), updated=doc["updated"]))
     return book
 
 
@@ -149,6 +163,8 @@ def compose(book, profile):
     if book.series:
         meta["series"] = book.series
     meta["series_index"] = book.series_index
+    if book.cover:
+        meta["cover"] = book.cover  #embed the cover so an exported doc carries its artwork (pure JSON)
     toc = _toc(book)
     if toc:
         meta["toc"] = toc
@@ -158,6 +174,18 @@ def compose(book, profile):
     #advertise which profile this is so the client can label its picker
     doc["profile"] = {"id": profile.profile_id, "name": profile.name}
     return doc
+
+
+def compose_or_transient(session, user_id, book, profile_id=DEFAULT_PID):
+    #compose the doc for a profile, or — when the book has no such profile yet (e.g. a freshly adopted book
+    #before its first context is added) — compose against a transient empty profile that is NOT persisted.
+    #the book-level chapters/timeline/cover still come through, so the timeline works on an empty book.
+    prof = get_profile(session, user_id, book.book_id, profile_id)
+    if prof is None:
+        prof = Profile(user_id=user_id, book_id=book.book_id, profile_id=profile_id,
+                       name="Main" if profile_id == DEFAULT_PID else "Profile",
+                       doc_json=json.dumps(new_doc()))
+    return compose(book, prof)
 
 
 def _idx0(v):
@@ -211,7 +239,7 @@ def ensure_profile(session, user_id, book_id, profile_id, *, name=None):
 def save_profile_doc(profile, book, merged, *, from_device):
     #store the merged doc on the profile, and push the book-level shared fields onto the Book. the device
     #(from_device) owns the reading position + chapter toc + book identity; the web only touches notes.
-    profile.doc_json = json.dumps(merged)
+    profile.doc_json = json.dumps(_without_cover(merged))
     profile.updated = merged.get("updated") or profile.updated
     book.updated = max(book.updated or 0, merged.get("updated") or 0)
     if not from_device:

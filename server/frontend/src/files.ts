@@ -10,6 +10,16 @@ export function downloadJson(filename: string, data: unknown) {
   URL.revokeObjectURL(url);
 }
 
+//download an already-built blob (e.g. a server-generated zip) under a chosen filename
+export function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function readJsonFile<T = unknown>(file: File): Promise<T> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

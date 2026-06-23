@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { btn, btnAccent, input } from "./ui";
 import { DEFAULT_THEME, DEFAULT_GRAPH, normalizeGraph, type Theme, type GraphPrefs, type CardMode, type CardSide } from "./theme";
-import { downloadJson, readJsonFile } from "./files";
+import { downloadJson, downloadBlob, readJsonFile } from "./files";
 import { loadTypeColors, saveTypeColors } from "./typeColors";
 import type { User } from "./types";
 
@@ -239,21 +239,43 @@ function DataSection({ theme, onThemeChange }: { theme: Theme; onThemeChange: (t
       setMsg({ ok: true, text: "appearance imported" });
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
   }
+  //all contexts download as a zip of one JSON per book, so each book's cover travels with its file
   async function exportContexts() {
     setMsg(null);
-    try { downloadJson("context-creator-contexts.json", await api("/api/export")); }
-    catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+    try {
+      const res = await fetch("/api/export.zip");
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+      downloadBlob("context-creator-contexts.zip", await res.blob());
+    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
   }
-  async function importContexts(file: File) {
+  //import a whole folder of exported book JSONs at once: read every .json, gather the books, merge in one go
+  async function importContexts(files: FileList) {
     setMsg(null);
     try {
-      const data = await readJsonFile(file);
-      const r = await api<{ imported: number }>("/api/import", { method: "POST", body: JSON.stringify(data) });
+      const jsons = Array.from(files).filter((f) => f.name.toLowerCase().endsWith(".json"));
+      if (!jsons.length) { setMsg({ ok: false, text: "no .json files in that folder" }); return; }
+      //read every file defensively so a stray/old/coverless/malformed json doesn't abort the whole import.
+      //old exports (no cover, or the single combined bundle) still load — cover is just optional metadata.
+      const books: unknown[] = [];
+      for (const f of jsons) {
+        try {
+          const data = await readJsonFile<{ books?: unknown[]; contexts?: unknown; book?: { id?: string } }>(f);
+          if (Array.isArray(data?.books)) books.push(...data.books);
+          else if (data?.contexts) books.push({ book_id: data.book?.id, doc: data }); //a bare single-book doc
+        } catch { /* skip anything that isn't a contexts file */ }
+      }
+      if (!books.length) { setMsg({ ok: false, text: "no contexts found in those files" }); return; }
+      const r = await api<{ imported: number }>("/api/import", {
+        method: "POST", body: JSON.stringify({ type: "context-creator-export", version: 2, books }),
+      });
       setMsg({ ok: true, text: `imported ${r.imported} book${r.imported === 1 ? "" : "s"} (merged)` });
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
   }
   const pick = (handler: (f: File) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]; e.target.value = ""; if (f) handler(f);
+  };
+  const pickFolder = (handler: (files: FileList) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fl = e.target.files; e.target.value = ""; if (fl && fl.length) handler(fl);
   };
 
   return (
@@ -263,11 +285,13 @@ function DataSection({ theme, onThemeChange }: { theme: Theme; onThemeChange: (t
         <label className={`${btn} cursor-pointer`}>Import<input type="file" accept=".json,application/json" className="hidden" onChange={pick(importAppearance)} /></label>
       </Row>
       <Row label="All contexts">
-        <button className={btn} onClick={exportContexts}>Export</button>
-        <label className={`${btn} cursor-pointer`}>Import<input type="file" accept=".json,application/json" className="hidden" onChange={pick(importContexts)} /></label>
+        <button className={btn} onClick={exportContexts}>Export (.zip)</button>
+        <label className={`${btn} cursor-pointer`}>Import folder
+          <input type="file" className="hidden" onChange={pickFolder(importContexts)}
+                 {...({ webkitdirectory: "", directory: "" } as Record<string, string>)} /></label>
       </Row>
       {msg && <span className={`text-sm ${msg.ok ? "text-green-700" : "text-red-600"}`}>{msg.text}</span>}
-      <p className="text-xs text-ink-faint">Importing contexts merges into your books, nothing is overwritten or lost. You can also export/import a single book from its page.</p>
+      <p className="text-xs text-ink-faint">Export downloads a zip with one JSON per book (covers included). To import, unzip it and pick the folder, every book's JSON is merged in, nothing is overwritten or lost. You can also export/import a single book from its page.</p>
     </Section>
   );
 }

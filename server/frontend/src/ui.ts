@@ -11,6 +11,10 @@ export const btnAccent =
   "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-semibold " +
   "shadow-card hover:bg-accent-hover active:scale-[0.98] transition disabled:opacity-50 " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring focus-visible:ring-offset-1";
+export const btnDanger =
+  "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold " +
+  "shadow-card hover:bg-red-700 active:scale-[0.98] transition disabled:opacity-50 " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-1";
 export const btnGhost =
   "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-ink-soft text-sm font-medium " +
   "hover:bg-paper-sunk hover:text-ink active:scale-[0.98] transition focus-visible:outline-none " +

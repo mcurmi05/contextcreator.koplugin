@@ -30,7 +30,7 @@ export interface Relationship {
 }
 
 export interface TocEntry { title: string; progress: number; }
-export interface BookMeta { id?: string; title?: string; authors?: string; toc?: TocEntry[]; }
+export interface BookMeta { id?: string; title?: string; authors?: string; cover?: string; toc?: TocEntry[]; }
 
 export interface NodePos { x: number; y: number; }
 
