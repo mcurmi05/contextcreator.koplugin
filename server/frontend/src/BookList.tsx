@@ -4,7 +4,7 @@ import { readJsonFile } from "./files";
 import { loadProfile, saveProfile } from "./profilePref";
 import {
   DEFAULT_PREFS, fetchHomePrefs, saveHomePrefs, applyManualOrder,
-  pinsFor, withOrder, withPins, type HomePrefs, type HomeSort,
+  pinsFor, withOrder, withPins, type HomePrefs, type HomeSort, type AuthorSort,
 } from "./homePrefs";
 import { btn, input } from "./ui";
 import type { BookSummary, LibraryEntry } from "./types";
@@ -21,6 +21,17 @@ const byOrder = (a: BookSummary, b: BookSummary) =>
   (a.series_index ?? 0) - (b.series_index ?? 0) || (a.title || "").localeCompare(b.title || "");
 
 const isExternal = (b: BookSummary) => b.source === "external";
+
+//sort key for an author by last name: take the first listed author (authors may be newline/&/"and"
+//separated), then its final whitespace token, handling the "Last, First" form by using the part before
+//the comma. used for the default home page author sort; first-name sort just uses the whole string.
+function lastNameKey(authors: string): string {
+  const first = (authors || "").split(/[\n;&]| and /i)[0].trim();
+  if (!first) return "";
+  if (first.includes(",")) return first.slice(0, first.indexOf(",")).trim().toLowerCase();
+  const parts = first.split(/\s+/);
+  return parts[parts.length - 1].toLowerCase();
+}
 
 //how long a reordered item takes to slide to its new spot, and the matching minimum gap between
 //reorders. kept slow + equal so each shift fully plays out and the user can follow what moved.
@@ -81,7 +92,7 @@ function Cover({ src, title }: { src?: string; title?: string }) {
   );
 }
 
-export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bookId: string) => void; showUnstarted?: boolean }) {
+export default function BookList({ onOpen, showUnstarted = true, showProgress = true }: { onOpen: (bookId: string) => void; showUnstarted?: boolean; showProgress?: boolean }) {
   const [books, setBooks] = useState<BookSummary[] | null>(null);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [attachFor, setAttachFor] = useState<string | null>(null); //external book_id being attached
@@ -93,8 +104,18 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
   const [editMeta, setEditMeta] = useState<string | null>(null);   //book_id whose series is being edited
   const [seriesDraft, setSeriesDraft] = useState("");
   const [idxDraft, setIdxDraft] = useState("");                     //1-based position as the user sees it
+  const [resetOpen, setResetOpen] = useState(false);               //whether the "reset order" menu is open
+  const resetRef = useRef<HTMLDivElement>(null);
+  const [dragHandle, setDragHandle] = useState<string | null>(null); //series whose grip is held (handle-only drag)
 
   useEffect(() => { void fetchHomePrefs().then(setPrefs); }, []);
+  //close the reset-order menu when clicking anywhere outside it
+  useEffect(() => {
+    if (!resetOpen) return;
+    const onDoc = (e: MouseEvent) => { if (resetRef.current && !resetRef.current.contains(e.target as Node)) setResetOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [resetOpen]);
   //change prefs optimistically and persist to the server
   const update = (next: HomePrefs) => { setPrefs(next); saveHomePrefs(next); };
   const grouped = prefs.group;
@@ -152,7 +173,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
     setDragId(null); setPreview(null);
   }
   //dropped outside any unit (cancel): revert to the saved order
-  function clearDrag() { setDragId(null); setPreview(null); }
+  function clearDrag() { setDragId(null); setPreview(null); setDragHandle(null); }
 
   //open a book at the chosen profile (remembering it so BookView lands there)
   function open(b: BookSummary) {
@@ -224,6 +245,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
   //so it's changed in koreader, not on the web. library entries already exclude anything that has a Book
   //row, so there are no duplicates.
   type DeviceCard = BookSummary & { started: boolean };
+  //started books carry their synced reading_progress; unstarted library entries have none
   const startedBooks: DeviceCard[] = (books || []).filter((b) => !isExternal(b)).map((b) => ({ ...b, started: true }));
   const libraryCards: DeviceCard[] = showUnstarted
     ? library.map((e) => ({ book_id: e.book_id, title: e.title, authors: e.authors, cover: e.cover, series: e.series || "", series_index: e.series_index ?? 0, started: false }))
@@ -234,7 +256,9 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
   //started/unstarted split only breaks ties
   const cardOrder = (a: DeviceCard, b: DeviceCard) => byOrder(a, b) || Number(b.started) - Number(a.started);
   const titleKey = (b: DeviceCard) => (b.title || b.book_id).toLowerCase();
-  const authorKey = (b: DeviceCard) => (b.authors || "").toLowerCase();
+  //author sort key honours the chosen direction: by last name (default) or the whole "First Last" string
+  const authorSortKey = (authors: string) => (prefs.authorSort === "first" ? (authors || "").toLowerCase() : lastNameKey(authors || ""));
+  const authorKey = (b: DeviceCard) => authorSortKey(b.authors || "");
   const pinFirst = (ids: string[], pins: string[]) => {
     const set = new Set(pins);
     return [...ids.filter((x) => set.has(x)), ...ids.filter((x) => !set.has(x))];
@@ -257,7 +281,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
     if (!groups.has(s)) groups.set(s, []);
     groups.get(s)!.push(b);
   }
-  const seriesAuthor = (s: string) => ((groups.get(s) || []).slice().sort(cardOrder)[0]?.authors || "").toLowerCase();
+  const seriesAuthor = (s: string) => authorSortKey((groups.get(s) || []).slice().sort(cardOrder)[0]?.authors || "");
   function orderedSeries(): string[] {
     let keys = [...groups.keys()];
     if (sort === "manual") {
@@ -272,7 +296,8 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
   }
 
   //reset the manual arrangement: re-seed the saved order for the current mode from a chosen sort
-  //(author or title), staying in manual so the user can keep tweaking from that starting point.
+  //(author or title), staying in manual so the user can keep tweaking from that starting point. pinned
+  //items are left exactly where they are — they float to the top, so only the unpinned rest gets resorted.
   function resetOrder(by: "author" | "title") {
     let ids: string[];
     if (grouped) {
@@ -286,15 +311,24 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
       if (by === "title") ids.sort((a, b) => titleKey(m.get(a)!).localeCompare(titleKey(m.get(b)!)));
       else ids.sort((a, b) => authorKey(m.get(a)!).localeCompare(authorKey(m.get(b)!)) || titleKey(m.get(a)!).localeCompare(titleKey(m.get(b)!)));
     }
-    update(withOrder(prefs, grouped, ids));
+    //keep pinned items in their current order at the front; resort only the unpinned ones
+    const pinSet = new Set(pinsFor(prefs, grouped));
+    const currentPinned = (grouped ? orderedSeries() : orderedBooks().map((b) => b.book_id)).filter((id) => pinSet.has(id));
+    update(withOrder(prefs, grouped, [...currentPinned, ...ids.filter((id) => !pinSet.has(id))]));
   }
 
   //the order actually shown: the saved order, with the live drag preview applied for the active mode.
   const byId = new Map(deviceBooks.map((b) => [b.book_id, b] as const));
   const seriesIds = grouped && preview ? preview.filter((s) => groups.has(s)) : orderedSeries();
   const bookIds = !grouped && preview ? preview.filter((id) => byId.has(id)) : orderedBooks().map((b) => b.book_id);
-  //re-run the slide animation whenever the shown order changes (a hook, so it runs every render)
-  const registerFlip = useFlip((grouped ? seriesIds : bookIds).join("|"));
+  //pinned and unpinned series are rendered as two separate stacks with independent slide animations, so a
+  //reorder of one never visually drags an item across the other (which caused a flash above the pins).
+  const pinnedSeries = seriesIds.filter((s) => prefs.pinSeries.includes(s));
+  const unpinnedSeries = seriesIds.filter((s) => !prefs.pinSeries.includes(s));
+  //re-run the slide animation whenever each shown order changes (hooks, so they run every render)
+  const registerFlipPinned = useFlip(pinnedSeries.join("|"));
+  const registerFlipUnpinned = useFlip(unpinnedSeries.join("|"));
+  const registerFlipBooks = useFlip(bookIds.join("|"));
 
   const gridClass = "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 items-start gap-2.5";
   const pinToggle = (id: string, pinned: boolean) => (
@@ -327,12 +361,25 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
     </div>
   );
 
+  //reading progress bar with the rounded percent at the end, for books we have a synced position for
+  const progressBar = (frac: number) => {
+    const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+    return (
+      <div className="mt-2 flex items-center gap-1.5" title={`${pct}% read`}>
+        <div className="flex-1 h-1.5 rounded-full bg-paper-sunk overflow-hidden">
+          <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${pct}%` }} />
+        </div>
+        <span className="text-[10px] tabular-nums text-ink-faint shrink-0">{pct}%</span>
+      </div>
+    );
+  };
+
   //a single book card. draggable (manual flat mode) and pinnable only when the book itself is the unit.
   //dragging is suspended while its series is being edited so the inputs work normally.
   const renderCard = (b: DeviceCard, draggable: boolean, pinnable: boolean) => {
     const canDrag = draggable && editMeta !== b.book_id;
     return (
-    <div key={b.book_id} ref={registerFlip(b.book_id)}
+    <div key={b.book_id} ref={registerFlipBooks(b.book_id)}
          draggable={canDrag || undefined}
          onDragStart={canDrag ? (e) => { setDragId(b.book_id); e.dataTransfer.effectAllowed = "move"; } : undefined}
          onDragEnd={canDrag ? clearDrag : undefined}
@@ -349,6 +396,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
           {b.authors && <span className="block text-sm text-ink-faint truncate mt-0.5">{b.authors}</span>}
         </span>
       </button>
+      {showProgress && b.started && b.reading_progress != null && progressBar(b.reading_progress)}
       {editMeta === b.book_id ? seriesEditor(b) : b.started ? (
         <>
           {(b.profiles?.length ?? 0) >= 1 && (
@@ -370,6 +418,43 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
     );
   };
 
+  //one series block. `register` is the FLIP ref callback for the stack it belongs to (pinned vs unpinned),
+  //so its slide animation stays scoped to that stack. drag still operates over the full seriesIds order.
+  const renderSeries = (series: string, register: (id: string) => (el: HTMLElement | null) => void) => {
+    const list = (groups.get(series) || []).slice().sort(cardOrder);
+    const draggable = sort === "manual";
+    //drag is started only from the grip in the top-left: the block becomes draggable while its grip is
+    //held, never from a blank click in the body. it's still a drop target anywhere, so you can drop a
+    //block onto any other block to reorder.
+    const armed = draggable && dragHandle === series;
+    return (
+      <div key={series || "_none"} ref={register(series)}
+           draggable={armed || undefined}
+           onDragStart={armed ? (e) => { setDragId(series); e.dataTransfer.effectAllowed = "move"; } : undefined}
+           onDragEnd={draggable ? clearDrag : undefined}
+           onDragOver={draggable ? (e) => { e.preventDefault(); dragOver(e, seriesIds, series); } : undefined}
+           onDrop={draggable ? (e) => { e.preventDefault(); dropOn(e, seriesIds, series); } : undefined}
+           className={`mb-6 rounded-xl border border-line p-4 transition ${
+             dragId === series ? "opacity-40 ring-2 ring-accent-ring ring-offset-2 ring-offset-paper" : ""}`}>
+        <div className="flex items-center gap-2 mb-2">
+          {draggable && (
+            <span className="text-ink-faint hover:text-ink select-none leading-none cursor-move" aria-hidden
+                  title="Drag to reorder"
+                  onMouseDown={() => setDragHandle(series)} onMouseUp={() => setDragHandle(null)}>⠿</span>
+          )}
+          {pinToggle(series, prefs.pinSeries.includes(series))}
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
+            {series || "Not in a series"}
+          </span>
+          <span className="text-xs text-ink-faint tabular-nums">{list.length}</span>
+        </div>
+        <div className={gridClass}>
+          {list.map((b) => renderCard(b, false, false))}
+        </div>
+      </div>
+    );
+  };
+
   if (!books) return <p className="text-ink-faint">Loading…</p>;
 
   return (
@@ -380,7 +465,7 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-faint">Your books</h2>
         <span className="flex-1" />
         <label className="flex items-center gap-1 text-xs text-ink-soft">
-          Sort
+          Sort by
           <select className={`${input} py-1 text-sm`} value={sort}
                   onChange={(e) => update({ ...prefs, sort: e.target.value as HomeSort })}>
             <option value="author">Author</option>
@@ -388,14 +473,35 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
             <option value="manual">Manual</option>
           </select>
         </label>
+        {sort === "author" && (
+          //author sort can go by last name (default) or first name
+          <label className="flex items-center gap-1 text-xs text-ink-soft">
+            by
+            <select className={`${input} py-1 text-sm`} value={prefs.authorSort} aria-label="Author sort order"
+                    onChange={(e) => update({ ...prefs, authorSort: e.target.value as AuthorSort })}>
+              <option value="last">Last name</option>
+              <option value="first">First name</option>
+            </select>
+          </label>
+        )}
         {sort === "manual" && deviceBooks.length > 0 && (
-          //re-seed the manual order from a chosen sort; the select snaps back to its placeholder
-          <select className={`${input} py-1 text-sm`} value="" aria-label="Reset manual order"
-                  onChange={(e) => { if (e.target.value) resetOrder(e.target.value as "author" | "title"); }}>
-            <option value="">Reset order…</option>
-            <option value="author">to Author</option>
-            <option value="title">to Title</option>
-          </select>
+          //a plain "Reset order" button that opens a small menu of what to re-seed the manual order from
+          <div className="relative" ref={resetRef}>
+            <button className={`${input} py-1 text-sm`} onClick={() => setResetOpen((v) => !v)}
+                    aria-haspopup="menu" aria-expanded={resetOpen}>
+              Reset order
+            </button>
+            {resetOpen && (
+              <div role="menu" className="absolute right-0 z-30 mt-1 w-36 rounded-lg border border-line bg-paper-card shadow-pop py-1">
+                {(["author", "title"] as const).map((by) => (
+                  <button key={by} role="menuitem" className="block w-full px-3 py-1.5 text-left text-sm hover:bg-paper-sunk transition"
+                          onClick={() => { resetOrder(by); setResetOpen(false); }}>
+                    to {by === "author" ? "Author" : "Title"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         <label className="flex items-center gap-1.5 text-xs text-ink-soft cursor-pointer select-none">
           <input type="checkbox" checked={grouped} onChange={(e) => update({ ...prefs, group: e.target.checked })} />
@@ -404,7 +510,9 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
       </div>
 
       {sort === "manual" && deviceBooks.length > 0 && (
-        <p className="text-xs text-ink-faint mb-2">Drag {grouped ? "series" : "books"} to arrange · {"☆"} pins to the top.</p>
+        <p className="text-xs text-ink-faint mb-2">
+          {grouped ? <>Drag series by the <span className="font-mono">⠿</span> grip to arrange</> : "Drag books to arrange"} · {"☆"} pins to the top.
+        </p>
       )}
 
       {deviceBooks.length === 0 && (
@@ -415,33 +523,11 @@ export default function BookList({ onOpen, showUnstarted = true }: { onOpen: (bo
       )}
 
       {grouped ? (
-        seriesIds.map((series) => {
-          const list = (groups.get(series) || []).slice().sort(cardOrder);
-          const draggable = sort === "manual";
-          //the whole block is the drag unit: grab it anywhere, drop it onto another block to reorder
-          return (
-            <div key={series || "_none"} ref={registerFlip(series)}
-                 draggable={draggable || undefined}
-                 onDragStart={draggable ? (e) => { setDragId(series); e.dataTransfer.effectAllowed = "move"; } : undefined}
-                 onDragEnd={draggable ? clearDrag : undefined}
-                 onDragOver={draggable ? (e) => { e.preventDefault(); dragOver(e, seriesIds, series); } : undefined}
-                 onDrop={draggable ? (e) => { e.preventDefault(); dropOn(e, seriesIds, series); } : undefined}
-                 className={`mb-6 rounded-xl border border-line p-4 transition ${draggable ? "cursor-move" : ""} ${
-                   dragId === series ? "opacity-40 ring-2 ring-accent-ring ring-offset-2 ring-offset-paper" : ""}`}>
-              <div className="flex items-center gap-2 mb-2">
-                {draggable && <span className="text-ink-faint select-none leading-none" aria-hidden title="Drag to reorder">⠿</span>}
-                {pinToggle(series, prefs.pinSeries.includes(series))}
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
-                  {series || "Not in a series"}
-                </span>
-                <span className="text-xs text-ink-faint tabular-nums">{list.length}</span>
-              </div>
-              <div className={gridClass}>
-                {list.map((b) => renderCard(b, false, false))}
-              </div>
-            </div>
-          );
-        })
+        //two independent stacks: pinned series, then the rest. each animates within itself.
+        <>
+          {pinnedSeries.map((s) => renderSeries(s, registerFlipPinned))}
+          {unpinnedSeries.map((s) => renderSeries(s, registerFlipUnpinned))}
+        </>
       ) : (
         <div className={`${gridClass} mb-5`}>
           {bookIds.map((id) => renderCard(byId.get(id)!, sort === "manual", true))}

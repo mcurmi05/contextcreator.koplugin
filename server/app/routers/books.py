@@ -74,6 +74,7 @@ def list_books(user: User = Depends(get_current_user), session: Session = Depend
         out.append({
             "book_id": b.book_id, "title": b.title, "authors": b.authors, "cover": b.cover,
             "series": b.series, "series_index": b.series_index, "source": b.source, "updated": b.updated,
+            "reading_progress": b.reading_progress,  #0..1 device reading position, for the home progress bar
             "profiles": [{"profile_id": p.profile_id, "name": p.name, "updated": p.updated} for p in profs],
         })
     return out
