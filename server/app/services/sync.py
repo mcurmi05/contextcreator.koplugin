@@ -9,12 +9,28 @@
 
 EMPTY_TOMBSTONES = ("contexts", "relationships", "points")
 
+#the doc schema this server writes. the schema history (1..3) only added fields / relaxed shapes that the
+#code below already tolerates (bare-string + id-less points in _merge_points, missing tombstones/layout/
+#`directed`), so an older doc needs no field rewrites — _normalize just fills the missing shape. a future
+#breaking change adds an explicit, idempotent migration step (see _migrate_doc) keyed on the source
+#version. a doc tagged with a NEWER schema keeps its higher version so a mixed fleet never silently
+#downgrades each other.
+SCHEMA_VERSION = 3
+
+
+def _migrate_doc(doc, from_version):
+    #hook for version-specific conversions of an older doc (none needed for 1..3 — all additive/tolerated).
+    #future: `if from_version < 4: ...`. mutates and returns doc.
+    return doc
+
 
 def _normalize(doc):
     #be defensive about types: a client serializing an EMPTY array can send {} (a JSON object) instead
     #of [], so coerce each field to the shape the merge expects rather than trusting the input.
     doc = dict(doc or {})
-    doc["schema"] = doc.get("schema") or 3
+    from_version = doc.get("schema") or 1
+    _migrate_doc(doc, from_version)
+    doc["schema"] = from_version if from_version > SCHEMA_VERSION else SCHEMA_VERSION
     doc["book"] = doc["book"] if isinstance(doc.get("book"), dict) else {}
     doc["updated"] = doc.get("updated") or 0
     doc["contexts"] = doc["contexts"] if isinstance(doc.get("contexts"), dict) else {}
@@ -32,7 +48,7 @@ def _normalize(doc):
 
 def new_doc():
     return {
-        "schema": 3,
+        "schema": SCHEMA_VERSION,
         "book": {},
         "updated": 0,
         "contexts": {},

@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import cytoscape, { type Core } from "cytoscape";
 import cola from "cytoscape-cola";
-import { colorFor, contextProgress, pointText, typeLabel, TYPE_LABELS } from "./model";
-import { btnGhost } from "./ui";
+import { colorFor, contextProgress, pointText, typeLabel, TYPE_LABELS } from "../lib/model";
+import { btnGhost } from "../lib/ui";
 import { IconImg, NetworkIcon } from "./icons";
 import { NodeCard, RelCard } from "./GraphCard";
-import type { GraphPrefs, XY } from "./theme";
-import type { Doc, GraphEditOps, PointRef, Selected } from "./types";
+import type { GraphPrefs, XY } from "../lib/theme";
+import type { Doc, GraphEditOps, PointRef, Selected } from "../lib/types";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -219,8 +219,10 @@ export default function Graph({ doc, scrub, onScrub, selected, onSelect, hiddenT
     const now = performance.now();
     cy.nodes().forEach((n) => {
       const cp = n.data("cp") as number | null;
-      //a node the story hasn't reached, or a filtered-out type, leaves the graph entirely
-      if (hidden.has(n.data("type") || "unset") || (cp != null && cp > sc)) { n.style("display", "none"); return; }
+      //a node the story hasn't reached (only ones with dot points are placed), or a filtered-out type,
+      //leaves the graph entirely. a context with no dot points always stays visible.
+      const ahead = (n.data("np") as number) > 0 && cp != null && cp > sc;
+      if (hidden.has(n.data("type") || "unset") || ahead) { n.style("display", "none"); return; }
       n.style({ display: "element", events: "yes" });
       const focused = !focus || focus.has(n.id());
       aim(n, focused ? 1 : 0.16, focused ? 1 : 0.25, now);
@@ -340,8 +342,11 @@ export default function Graph({ doc, scrub, onScrub, selected, onSelect, hiddenT
 
     const nodeData = (k: string) => {
       const c = contexts[k];
+      const np = (c.points || []).length;
+      //np = how many dot points it has. a context with none isn't placed on the timeline (its bare anchor
+      //isn't real content), so it always shows; one with points is faded in by the earliest point's spot.
       return { id: k, label: c.title || k, color: colorFor(c.type, colorsRef.current), type: c.type || "unset",
-               size: nodeSize((c.points || []).length), cp: contextProgress(c) };
+               size: nodeSize(np), np, cp: contextProgress(c) };
     };
 
     if (struct !== structRef.current) {
@@ -504,7 +509,7 @@ export default function Graph({ doc, scrub, onScrub, selected, onSelect, hiddenT
     const node = cy.getElementById(key);
     if (node.empty()) return;
     const cp = node.data("cp") as number | null;
-    if (cp != null && cp > scrubRef.current) onScrub(cp);
+    if ((node.data("np") as number) > 0 && cp != null && cp > scrubRef.current) onScrub(cp);
     const type = (node.data("type") as string) || "unset";
     if (hiddenRef.current.has(type)) onToggleType(type);
     onSelect({ kind: "context", id: key });
@@ -512,10 +517,18 @@ export default function Graph({ doc, scrub, onScrub, selected, onSelect, hiddenT
     setTimeout(() => { cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1), duration: 350 }); }, 80);
   }
 
-  //legend / filter data: which types are actually present, with counts
+  //legend / filter data: which types are present, counted by what's actually on screen at the current
+  //scrub (matching the graph's visibility) — a context placed ahead of the timeline isn't tallied, an
+  //unplaced one (no dot points) always is. so the per-type numbers track what you can currently see.
   const contexts = doc.contexts || {};
   const counts: Record<string, number> = {};
-  for (const k in contexts) { const t = contexts[k].type || "unset"; counts[t] = (counts[t] || 0) + 1; }
+  for (const k in contexts) {
+    const c = contexts[k];
+    const cp = contextProgress(c);
+    if ((c.points || []).length > 0 && cp != null && cp > scrub) continue; //ahead of the timeline
+    const t = c.type || "unset";
+    counts[t] = (counts[t] || 0) + 1;
+  }
   const order = ["character", "place", "object", "concept"];
   const present = [
     ...order.filter((t) => counts[t]),

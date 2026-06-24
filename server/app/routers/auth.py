@@ -6,10 +6,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from ..db import get_session
-from ..deps import admin_user_id, get_current_user
+from ..core.db import get_session
+from ..core.deps import admin_user_id, get_current_user
 from ..models import User, UserPref
-from ..security import hash_password, verify_password
+from ..core.security import hash_password, verify_password
 
 router = APIRouter(prefix="/api", tags=["auth"])
 

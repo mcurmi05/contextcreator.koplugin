@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { pointText, pointProgress, typeLabel, colorFor, relArrow } from "./model";
+import { pointText, pointProgress, typeLabel, colorFor, relArrow } from "../lib/model";
 import PointItem from "./PointItem";
-import type { Doc, GraphEditOps, Point, Selected } from "./types";
+import type { Doc, GraphEditOps, Point, Selected } from "../lib/types";
 
 const pointRef = (p: Point, i: number) => ({ id: typeof p === "object" ? p.id : undefined, index: i });
 

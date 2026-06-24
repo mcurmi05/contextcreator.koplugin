@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { btn, btnAccent, btnDanger } from "./ui";
+import { btn, btnAccent, btnDanger } from "../lib/ui";
 
 //a small centred modal matching the app's surfaces (same backdrop/animation as the Settings dialog).
 //closes on Escape or a backdrop click. used for the graph's "Add context" / "Add relationship" inputs

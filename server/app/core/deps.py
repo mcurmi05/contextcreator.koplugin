@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlmodel import Session, select
 
 from .db import get_session
-from .models import User
+from ..models import User
 from .security import verify_password
 
 

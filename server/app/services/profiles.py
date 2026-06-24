@@ -8,10 +8,37 @@ import secrets
 from sqlmodel import select
 
 from . import docops
-from .models import Book, DevicePosition, LibraryEntry, Profile
+from ..models import Book, DevicePosition, LibraryEntry, Profile, ProfileTombstone
 from .sync import _normalize, merge, new_doc
 
 DEFAULT_PID = "default"
+
+
+def _tomb(session, user_id, book_id, profile_id):
+    return session.exec(select(ProfileTombstone).where(
+        ProfileTombstone.user_id == user_id, ProfileTombstone.book_id == book_id,
+        ProfileTombstone.profile_id == profile_id)).first()
+
+
+def tombstone_profile(session, user_id, book_id, profile_id, version):
+    #mark a profile as deleted, remembering the content version (`updated`) it had, so a later device push
+    #with strictly newer real content can still resurrect it but a stale/empty replay can't.
+    row = _tomb(session, user_id, book_id, profile_id)
+    if row:
+        row.version = max(row.version or 0, version or 0)
+    else:
+        session.add(ProfileTombstone(user_id=user_id, book_id=book_id, profile_id=profile_id, version=version or 0))
+
+
+def profile_tombstone_version(session, user_id, book_id, profile_id):
+    row = _tomb(session, user_id, book_id, profile_id)
+    return row.version if row else None
+
+
+def clear_profile_tombstone(session, user_id, book_id, profile_id):
+    row = _tomb(session, user_id, book_id, profile_id)
+    if row:
+        session.delete(row)
 
 
 def _without_cover(doc):
@@ -223,7 +250,9 @@ def ensure_book(session, user_id, book_id, *, title="", authors="", source="devi
 
 def ensure_profile(session, user_id, book_id, profile_id, *, name=None):
     #fetch a profile, creating an empty one if it's missing (used by sync when the device writes to a
-    #profile that only exists on the device yet, and by adopt/import)
+    #profile that only exists on the device yet, and by adopt/import). `name` only seeds a brand-new
+    #profile — it never renames an existing one, so a name set on the web isn't clobbered by the device
+    #replaying its (possibly stale) local name on every push. device renames go through rename_profile.
     prof = get_profile(session, user_id, book_id, profile_id)
     if prof is None:
         prof = Profile(user_id=user_id, book_id=book_id, profile_id=profile_id,
@@ -231,8 +260,7 @@ def ensure_profile(session, user_id, book_id, profile_id, *, name=None):
                        doc_json=json.dumps(new_doc()))
         session.add(prof)
         session.flush()
-    elif name and name.strip() and prof.name != name.strip():
-        prof.name = name.strip()
+        clear_profile_tombstone(session, user_id, book_id, profile_id)  #re-created -> it's no longer deleted
     return prof
 
 

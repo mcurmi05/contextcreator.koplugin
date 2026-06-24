@@ -50,6 +50,8 @@ function ContextCreator:init()
     --seamless sync: push (debounced) after any change, pull on open, flush on close
     self.sync = ContextSync:new(self.store)
     self.store.on_change = function() self.sync:scheduleSync() end
+    --when a sync pulls in a remote change (e.g. a dot point added on the webapp), repaint the open list
+    self.sync.on_synced = function() self.view:refreshOpen() end
     if self.sync:isConfigured() then
         --pull server changes shortly after the book opens (don't block the open), then keep polling
         --periodically so web/other-device edits show up without a manual sync
@@ -147,9 +149,10 @@ end
 function ContextCreator:profilesMenu()
     local items = {}
     for _, p in ipairs(self.store:getProfileList()) do
-        local id = p.id
+        local id, name = p.id, p.name
         items[#items + 1] = {
-            text = p.name,
+            --text_func (not a static string) so a rename refreshes live on the next updateItems()
+            text_func = function() return self.store:getProfileName(id) end,
             checked_func = function() return self.store:getProfileId() == id end,
             callback = function(touchmenu)
                 self.store:setProfileId(id)
@@ -157,6 +160,9 @@ function ContextCreator:profilesMenu()
                 if self.sync then self.sync:syncNow() end --pull this profile's contents down
                 self.view:showAllContexts()
             end,
+            --long-press a profile to rename or delete it (both sync to the web + other devices).
+            --pass only the id; the name is read fresh from the store so a previous rename is reflected.
+            hold_callback = function(touchmenu) self:profileActions(touchmenu, id) end,
         }
     end
     items[#items + 1] = {
@@ -166,6 +172,69 @@ function ContextCreator:profilesMenu()
         callback = function(touchmenu) self:promptNewProfile(touchmenu) end,
     }
     return items
+end
+
+--long-press actions on a profile: rename or delete it. shown as a small button dialog. the name is
+--read fresh from the store (not captured at menu-build time) so it reflects a previous rename.
+function ContextCreator:profileActions(touchmenu, id)
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local name = self.store:getProfileName(id)
+    local dialog
+    dialog = ButtonDialog:new{
+        title = T(_("Profile: %1"), name),
+        title_align = "center",
+        buttons = {
+            {{ text = _("Rename\u{2026}"), callback = function() UIManager:close(dialog); self:promptRenameProfile(touchmenu, id) end }},
+            {{ text = _("Delete"), callback = function() UIManager:close(dialog); self:confirmDeleteProfile(touchmenu, id) end }},
+            {{ text = _("Cancel"), callback = function() UIManager:close(dialog) end }},
+        },
+    }
+    UIManager:show(dialog)
+end
+
+--rename a profile locally and push the new name to the server (so the web + other devices pick it up)
+function ContextCreator:promptRenameProfile(touchmenu, id)
+    local InputDialog = require("ui/widget/inputdialog")
+    local name = self.store:getProfileName(id) --current name, so the input prefills with the latest
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Rename profile"),
+        input = name,
+        input_hint = _("profile name"),
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            {
+                text = _("Rename"),
+                is_enter_default = true,
+                callback = function()
+                    local newname = dialog:getInputText()
+                    UIManager:close(dialog)
+                    if newname and newname ~= "" and newname ~= name then
+                        self.store:renameProfile(id, newname)
+                        if self.sync then self.sync:renameProfileRemote(id, newname) end
+                        if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
+                    end
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+--delete a profile locally (after confirming) and on the server, so the web + other devices drop it too
+function ContextCreator:confirmDeleteProfile(touchmenu, id)
+    local ConfirmBox = require("ui/widget/confirmbox")
+    local name = self.store:getProfileName(id)
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Delete profile \u{201C}%1\u{201D}? Its notes are removed and can't be recovered."), name),
+        ok_text = _("Delete"),
+        ok_callback = function()
+            self.store:removeProfile(id)
+            if self.sync then self.sync:deleteProfileRemote(id) end
+            if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
+        end,
+    })
 end
 
 --prompt for a new profile name, create it locally (made active) and sync so the server registers it

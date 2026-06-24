@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from .. import docops, profiles
-from ..db import get_session
-from ..deps import get_current_user
+from ..services import docops, profiles
+from ..core.db import get_session
+from ..core.deps import get_current_user
 from ..models import Book, LibraryEntry, Profile, User
-from ..profiles import DEFAULT_PID
-from ..sync import _normalize, new_doc
+from ..services.profiles import DEFAULT_PID
+from ..services.sync import _normalize, new_doc
 
 router = APIRouter(prefix="/api", tags=["books"])
 
@@ -124,6 +124,9 @@ def rename_profile(book_id: str, profile_id: str, body: ProfileRename, user: Use
 def delete_profile(book_id: str, profile_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     rows = profiles.list_profiles(session, user.id, book_id)
     prof = _get_profile(session, user, book_id, profile_id)
+    #tombstone it so the device can't resurrect it on its next push (additive sync would otherwise re-add
+    #the notes it still holds). the version is its current content so a genuinely newer edit can override.
+    profiles.tombstone_profile(session, user.id, book_id, profile_id, prof.updated)
     session.delete(prof)
     #if that was the last profile, drop the Book itself. for a device book its library catalog entry
     #resurfaces so it shows "start contexts" again; an imported book is simply removed.

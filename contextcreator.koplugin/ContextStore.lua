@@ -45,13 +45,17 @@ function ContextStore:getBookTitle()
     return title or "Untitled"
 end
 
---the file for the currently active profile. the "default" profile keeps the plain <title>.json name
---(so books from before profiles existed just keep working), other profiles get a <title>.<id>.json file.
-function ContextStore:getBookFilePath()
+--the file for a given profile id. the "default" profile keeps the plain <title>.json name (so books
+--from before profiles existed just keep working), other profiles get a <title>.<id>.json file.
+function ContextStore:profileFilePath(pid)
     local base = self:getStoreDir() .. "/" .. ContextText.sanitizeFilename(self:getBookTitle())
-    local pid = self:getProfileId()
     if pid == "default" then return base .. ".json" end
     return base .. "." .. pid .. ".json"
+end
+
+--the file for the currently active profile.
+function ContextStore:getBookFilePath()
+    return self:profileFilePath(self:getProfileId())
 end
 
 --profiles: a book can hold several named context docs, the user picks which to read/write on the device
@@ -92,12 +96,51 @@ function ContextStore:getProfileList()
     return list
 end
 
---replace the known profile list (e.g. after pulling it from the server), keeping the active selection
+--replace the known profile list (e.g. after pulling it from the server), keeping the active selection.
+--if the active profile is no longer in the list (e.g. it was deleted on the web), fall back to the first.
 function ContextStore:setProfileList(list)
     local bp = self:bookProfiles()
-    bp.list = list
-    if not bp.active then bp.active = "default" end
+    bp.list = (list and #list > 0) and list or { { id = "default", name = "Main" } }
+    local has_active = false
+    for _, p in ipairs(bp.list) do if p.id == bp.active then has_active = true break end end
+    if not has_active then bp.active = bp.list[1].id end
     self:saveBookProfiles(bp)
+end
+
+--rename a profile in the local list (the server is told separately by the sync layer)
+function ContextStore:renameProfile(id, name)
+    local bp = self:bookProfiles()
+    for _, p in ipairs(bp.list or {}) do
+        if p.id == id then p.name = name end
+    end
+    self:saveBookProfiles(bp)
+end
+
+--remove a profile locally: drop it from the list, delete its json file, and switch off it if it was
+--active. recreates a default if it was the last one. returns the (possibly new) active id.
+function ContextStore:removeProfile(id)
+    local bp = self:bookProfiles()
+    local kept = {}
+    for _, p in ipairs(bp.list or {}) do
+        if p.id ~= id then kept[#kept + 1] = p end
+    end
+    if #kept == 0 then kept = { { id = "default", name = "Main" } } end
+    bp.list = kept
+    if bp.active == id then bp.active = kept[1].id end
+    self:saveBookProfiles(bp)
+    os.remove(self:profileFilePath(id)) --best-effort; the file may not exist
+    return bp.active
+end
+
+--mark a local profile as confirmed on the server, so a later sync can tell a brand-new local-only
+--profile (keep it) apart from one the server has since dropped (deleted on the web -> remove it).
+function ContextStore:markProfileSynced(id)
+    local bp = self:bookProfiles()
+    local changed = false
+    for _, p in ipairs(bp.list or {}) do
+        if p.id == id and not p.synced then p.synced = true; changed = true end
+    end
+    if changed then self:saveBookProfiles(bp) end
 end
 
 function ContextStore:getProfileName(id)
@@ -287,7 +330,7 @@ function ContextStore:load()
         doc = data or ContextSchema.newDoc()
     end
 
-    ContextSchema.normalize(doc)
+    ContextSchema.migrate(doc) --upgrade an older on-disk schema, then normalise shape (+ stamp the version)
     local ids_added = ContextSchema.ensurePointIds(doc) --legacy/imported points get stable ids for clean sync
 
     --keep the book metadata fresh (cheap, and the id/title can only become known after open)

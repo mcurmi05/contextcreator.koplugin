@@ -1,8 +1,8 @@
 import { useState } from "react";
 import PointItem from "./PointItem";
 import { IconImg, TrashImg } from "./icons";
-import { colorFor, isCustomType, pointText, pointProgress, typeLabel } from "./model";
-import type { Context, GraphEditOps, Point, PointRef, Relationship, Selected } from "./types";
+import { colorFor, isCustomType, pointText, pointProgress, typeLabel } from "../lib/model";
+import type { Context, GraphEditOps, Point, PointRef, Relationship, Selected } from "../lib/types";
 
 const pointRef = (p: Point, i: number): PointRef => ({ id: typeof p === "object" ? p.id : undefined, index: i });
 const BUILTIN_TYPES = ["character", "place", "object", "concept", "unset"];

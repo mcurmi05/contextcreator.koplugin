@@ -118,6 +118,16 @@ function ContextSyncClient:listProfiles(book_id)
     return self:request("GET", "/api/sync/books/" .. book_id .. "/profiles")
 end
 
+--rename a profile on the server (so a rename made on the device reaches the web + other devices)
+function ContextSyncClient:renameProfile(book_id, profile_id, name)
+    return self:request("PATCH", "/api/sync/books/" .. book_id .. "/profiles/" .. urlencode(profile_id), { name = name })
+end
+
+--delete a profile on the server (so a delete made on the device reaches the web + other devices)
+function ContextSyncClient:deleteProfile(book_id, profile_id)
+    return self:request("DELETE", "/api/sync/books/" .. book_id .. "/profiles/" .. urlencode(profile_id))
+end
+
 --report the device's book catalog (a list of { book_id, title, authors, cover? }) so the web ui can
 --offer to start contexts for books that have no notes yet, and show cover art. cover is a data: url,
 --sent only the first time a book is seen.

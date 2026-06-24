@@ -9,7 +9,7 @@ engine = create_engine(
 
 def init_db():
     #import models so their tables are registered before create_all
-    from . import models  # noqa: F401
+    from .. import models  # noqa: F401
     SQLModel.metadata.create_all(engine)
     _migrate()
 
@@ -72,7 +72,7 @@ def _seed_default_profiles():
 
     from sqlmodel import Session, select
 
-    from .models import Book, Profile
+    from ..models import Book, Profile
 
     with Session(engine) as session:
         books = session.exec(select(Book)).all()

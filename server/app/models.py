@@ -72,6 +72,19 @@ class UserPref(SQLModel, table=True):
     home_json: str = "{}"     #the home-page view preferences object
     updated: int = 0
 
+#records that a profile was deleted (on the web or a device). the sync is otherwise purely additive, so
+#without this a device that still holds the notes would silently resurrect a deleted book/profile on its
+#next push. `version` is the profile's `updated` at deletion: a push is only allowed to recreate it when
+#it carries real content with a newer `updated` (a genuine edit made after the delete); anything older or
+#empty is dropped (the device adopts the empty doc back and clears its local copy).
+class ProfileTombstone(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "book_id", "profile_id", name="uq_profiletomb"),)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    book_id: str = Field(index=True)
+    profile_id: str = Field(index=True)
+    version: int = 0   #the profile's `updated` when it was deleted
+
 #a book known to be on the koreader device (from its read history) that may not have a contexts doc yet.
 #lets the web ui offer "start a context for a book you haven't taken notes on".
 class LibraryEntry(SQLModel, table=True):

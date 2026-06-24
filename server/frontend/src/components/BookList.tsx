@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api } from "./api";
-import { readJsonFile } from "./files";
-import { loadProfile, saveProfile } from "./profilePref";
+import { api } from "../lib/api";
+import { readJsonFile } from "../lib/files";
+import { loadProfile, saveProfile } from "../lib/profilePref";
 import {
   DEFAULT_PREFS, fetchHomePrefs, saveHomePrefs, applyManualOrder,
   pinsFor, withOrder, withPins, type HomePrefs, type HomeSort, type AuthorSort,
-} from "./homePrefs";
-import { btn, input } from "./ui";
-import type { BookSummary, LibraryEntry } from "./types";
+} from "../lib/homePrefs";
+import { btn, input } from "../lib/ui";
+import type { BookSummary, LibraryEntry } from "../lib/types";
 
 //the profile a card will open at: the remembered choice if it still exists, else the first profile
 function chosenProfile(b: BookSummary, override?: string): string {
@@ -92,7 +92,7 @@ function Cover({ src, title }: { src?: string; title?: string }) {
   );
 }
 
-export default function BookList({ onOpen, showUnstarted = true, showProgress = true }: { onOpen: (bookId: string) => void; showUnstarted?: boolean; showProgress?: boolean }) {
+export default function BookList({ onOpen, showUnstarted = true, showProgress = true }: { onOpen: (bookId: string, profileName?: string) => void; showUnstarted?: boolean; showProgress?: boolean }) {
   const [books, setBooks] = useState<BookSummary[] | null>(null);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [attachFor, setAttachFor] = useState<string | null>(null); //external book_id being attached
@@ -175,11 +175,12 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
   //dropped outside any unit (cancel): revert to the saved order
   function clearDrag() { setDragId(null); setPreview(null); setDragHandle(null); }
 
-  //open a book at the chosen profile (remembering it so BookView lands there)
+  //open a book at the chosen profile (remembering it so BookView lands there). the profile's name goes
+  //into the URL (/<bookId>/<profileName>); a book with no profiles yet opens at /<bookId>.
   function open(b: BookSummary) {
     const pid = chosenProfile(b, picked[b.book_id]);
     saveProfile(b.book_id, pid);
-    onOpen(b.book_id);
+    onOpen(b.book_id, (b.profiles || []).find((p) => p.profile_id === pid)?.name);
   }
   function pickProfile(bookId: string, pid: string) {
     setPicked((m) => ({ ...m, [bookId]: pid }));

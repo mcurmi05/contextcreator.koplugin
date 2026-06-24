@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
-import { btn, btnAccent, input } from "./ui";
-import { DEFAULT_THEME, DEFAULT_GRAPH, normalizeGraph, type Theme, type GraphPrefs, type CardMode, type CardSide } from "./theme";
-import { downloadJson, downloadBlob, readJsonFile } from "./files";
-import { loadTypeColors, saveTypeColors } from "./typeColors";
-import type { User } from "./types";
+import { api } from "../lib/api";
+import { btn, btnAccent, input } from "../lib/ui";
+import { DEFAULT_THEME, DEFAULT_GRAPH, normalizeGraph, type Theme, type GraphPrefs, type CardMode, type CardSide } from "../lib/theme";
+import { downloadJson, downloadBlob, readJsonFile } from "../lib/files";
+import { loadTypeColors, saveTypeColors } from "../lib/typeColors";
+import type { User } from "../lib/types";
 
 interface UserRow { id: number; username: string; is_admin: boolean }
 

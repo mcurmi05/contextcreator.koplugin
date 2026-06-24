@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { btn, btnAccent, btnGhost } from "./ui";
-import type { DevicePosition, Doc, TocEntry } from "./types";
+import { btn, btnAccent, btnGhost } from "../lib/ui";
+import type { DevicePosition, Doc, TocEntry } from "../lib/types";
 
 //a place "jump to current" can send the scrubber: a koreader device's last-read spot. when no device has
 //reported yet we fall back to the doc's single shared reading_progress as one unnamed target.
@@ -61,10 +61,22 @@ export default function Timeline({ doc, devices = [], external = false, scrub, o
   //fall back to the raw fraction.
   function deviceRp(d: DevicePosition): number {
     if (d.chapter && typeof d.chapter_frac === "number" && toc.length) {
-      const i = toc.findIndex((c) => c.title === d.chapter);
-      if (i >= 0) {
+      //some books reuse a chapter title at several spots (e.g. "Jon" in Game of Thrones), so don't just
+      //take the first match — pick the occurrence nearest the raw reading position. the raw fraction
+      //drifts only slightly, far less than the gap between two same-named chapters, so it reliably tells
+      //which one the device is actually in.
+      const rp = clamp01(d.reading_progress);
+      let best = -1, bestDist = Infinity;
+      for (let i = 0; i < toc.length; i++) {
+        if (toc[i].title !== d.chapter) continue;
         const start = toc[i].progress;
         const end = i + 1 < toc.length ? toc[i + 1].progress : 1;
+        const dist = rp < start ? start - rp : rp > end ? rp - end : 0; //distance from rp to [start,end]
+        if (dist < bestDist) { bestDist = dist; best = i; }
+      }
+      if (best >= 0) {
+        const start = toc[best].progress;
+        const end = best + 1 < toc.length ? toc[best + 1].progress : 1;
         return clamp01(start + d.chapter_frac * Math.max(0, end - start));
       }
     }

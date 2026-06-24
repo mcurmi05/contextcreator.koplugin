@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api } from "../lib/api";
 import Auth from "./Auth";
 import BookList from "./BookList";
 import BookView from "./BookView";
 import Settings from "./Settings";
-import { btn, btnGhost } from "./ui";
-import { applyTheme, loadTheme, saveTheme, type Theme } from "./theme";
-import type { User } from "./types";
-
-type Phase = "loading" | "auth" | "books" | "book";
+import { btn, btnGhost } from "../lib/ui";
+import { applyTheme, loadTheme, saveTheme, type Theme } from "../lib/theme";
+import { useRoute } from "../lib/router";
+import type { User } from "../lib/types";
 
 //the default brand mark as an svg data url, used for the favicon when no custom logo is set
 const DEFAULT_MARK_SVG =
@@ -48,33 +47,40 @@ function Gear() {
 }
 
 export default function App() {
-  const [phase, setPhase] = useState<Phase>("loading");
+  const [authChecked, setAuthChecked] = useState(false);
   const [me, setMe] = useState<User | null>(null);
-  const [bookId, setBookId] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(loadTheme);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [route, navigate] = useRoute();
+
+  //canonicalise the bare root ("/") to "/home" so visiting the server address lands on a real route
+  useEffect(() => {
+    if (route.name === "home" && window.location.pathname !== "/home") navigate({ name: "home" }, true);
+  }, [route, navigate]);
 
   useEffect(() => { applyTheme(theme); applyTabBranding(theme.logo, theme.title); }, [theme]);
   function setTheme(t: Theme) { setThemeState(t); saveTheme(t); applyTheme(t); }
 
   async function checkAuth() {
-    try { setMe(await api<User>("/api/me")); setPhase("books"); }
-    catch { setMe(null); setPhase("auth"); }
+    try { setMe(await api<User>("/api/me")); }
+    catch { setMe(null); }
+    finally { setAuthChecked(true); }
   }
   useEffect(() => { void checkAuth(); }, []);
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
-    setMe(null); setPhase("auth");
+    setMe(null);
+    navigate({ name: "home" });
   }
 
-  if (phase === "loading") return <div className="h-full grid place-items-center text-ink-faint">Loading…</div>;
-  if (phase === "auth") return <Auth onAuthed={checkAuth} title={theme.title} logo={theme.logo} />;
+  if (!authChecked) return <div className="h-full grid place-items-center text-ink-faint">Loading…</div>;
+  if (!me) return <Auth onAuthed={checkAuth} title={theme.title} logo={theme.logo} />;
 
   return (
     <div className="h-full flex flex-col">
       <header className="sticky top-0 z-30 flex items-center gap-2.5 px-5 h-14 border-b border-line bg-paper/85 backdrop-blur">
-        <button onClick={() => { setBookId(null); setPhase("books"); }}
+        <button onClick={() => navigate({ name: "home" })}
                 className="flex items-center gap-2.5 min-w-0 -mx-1 px-1 py-1 rounded-lg hover:bg-paper-sunk transition"
                 title="Home" aria-label="Home">
           {theme.logo
@@ -89,13 +95,15 @@ export default function App() {
       </header>
 
       <main className="flex-1 min-h-0">
-        {phase === "books" && (
+        {route.name === "home" ? (
           <div className="max-w-6xl mx-auto px-4 py-8">
-            <BookList showUnstarted={theme.showUnstarted} showProgress={theme.showProgress} onOpen={(id) => { setBookId(id); setPhase("book"); }} />
+            <BookList showUnstarted={theme.showUnstarted} showProgress={theme.showProgress}
+                      onOpen={(id, profileName) => navigate({ name: "book", bookId: id, profileName })} />
           </div>
-        )}
-        {phase === "book" && bookId && (
-          <BookView bookId={bookId} onBack={() => { setBookId(null); setPhase("books"); }}
+        ) : (
+          <BookView key={route.bookId} bookId={route.bookId} profileName={route.profileName}
+                    onProfileChange={(profileName) => navigate({ name: "book", bookId: route.bookId, profileName }, true)}
+                    onBack={() => navigate({ name: "home" })}
                     graph={theme.graph} onGraphChange={(g) => setTheme({ ...theme, graph: g })} />
         )}
       </main>

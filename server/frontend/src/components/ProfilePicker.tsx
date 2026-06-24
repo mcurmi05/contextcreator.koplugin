@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { btn } from "./ui";
+import { btn } from "../lib/ui";
 import { ConfirmDialog } from "./Modal";
 import { TrashImg } from "./icons";
-import type { ProfileSummary } from "./types";
+import type { ProfileSummary } from "../lib/types";
 
 //the per-book profile switcher: a book can hold several named context documents (e.g. "Main",
 //"Spoiler-free reread"). this picks which one the web is viewing/editing. the device picks its own
