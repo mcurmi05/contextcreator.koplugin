@@ -98,4 +98,4 @@ Enabling a per book graph of your contexts and the links between them, nodes col
 - **Settings**: accent and timeline colours, a custom logo and title, all the graph layout options above, and import/export. Everything you customise is saved and travels with an exported appearance config, so you can share your exact setup. You can also export/import all your contexts, or a single book's.
 
 The example json in the graph view (this example json is ai generated, but I'll add a new example when I get through a full book using the plugin) :)
-<img width="1915" height="926" alt="image" src="https://github.com/user-attachments/assets/02419953-20d7-4343-a181-05186cd6ab02" />
+<img width="1908" height="917" alt="image" src="https://github.com/user-attachments/assets/59c9f021-7a3c-4f9d-b069-734765f155c1" />
