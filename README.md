@@ -70,7 +70,7 @@ You can also bind **Context Creator: view contexts** and **Context Creator: sync
 
 ### Making the buttons show on a plain long press
 
-The two buttons live in KOReader's text selection popup. If a quick long press on a single word jumps **straight to the dictionary**, that's KOReader's default single word behaviour, not the plugin. Two ways to get the buttons:
+The context creator buttons live in KOReader's text selection popup. If a quick long press on a single word jumps **straight to the dictionary**, that's KOReader's default single word behaviour, not the plugin. Two ways to get the buttons:
 
 1. **Select the text**: long press and drag a little to select the word (or a phrase) and release. The selection popup always shows, with the Context Creator buttons in it.
 2. **Change the long press behaviour**: so a single word long press opens the selection popup instead of the dictionary. In KOReader's top menu open the gear (Settings) -> **Taps and gestures**, and set the long press/text selection action to **Ask with popup dialog** rather than going straight to dictionary, and also uncheck **Dictionary on single word selection**. Once a long press opens the selection popup, the **Add to context** and **View all contexts** buttons will showup at the bottom. You can still select dictionary from this pop up menu when you would like to use it.
@@ -85,7 +85,7 @@ The JSON still lives on the device, it just syncs up to and down from the server
 
 Enabling a per book graph of your contexts and the links between them, nodes coloured by type and sized by how much you've written
 
-- **Edit everything from the graph**: click a node or link to rename, retype, add/edit/delete dot points, create/edit/delete links, change direction. Every change syncs back to KOReader through the same merge.
+- **Edit everything from the graph**: click a node or link to rename, add aliases for it, retype, add/edit/delete dot points, create/edit/delete links, change direction. Every change syncs back to KOReader through the same merge.
 - **Timeline scrubber**: scrub through the book's narrative, contexts fade in as the story reaches them, with chapter bands. A **Jump to current** button snaps the timeline to where you're actually up to in KOReader, and **Show all** reveals everything.
 - **Profiles**: the same book can have several named context documents, switch between them from the profile dropdown in the book header, or create one (blank or a copy of the current notes), rename and delete them. The web remembers its own selection per book, independent of what the device is reading, and reading position plus the chapter timeline stay shared across all of a book's profiles.
 - **Search**: find any context by name or any dot point by its text from the search box on the graph, clicking a hit jumps the camera to that node and reveals it if it's ahead of the timeline.
@@ -97,5 +97,5 @@ Enabling a per book graph of your contexts and the links between them, nodes col
 - **Books screen**: group books into a series by dragging, reorder them, set a series index.
 - **Settings**: accent and timeline colours, a custom logo and title, all the graph layout options above, and import/export. Everything you customise is saved and travels with an exported appearance config, so you can share your exact setup. You can also export/import all your contexts, or a single book's.
 
-The example json in the graph view {this example json is ai generated, but I'll add a new example when I get through a full book using the plugin :)
-<img width="1915" height="926" alt="image" src="https://github.com/user-attachments/assets/02419953-20d7-4343-a181-05186cd6ab02" />
+The example json in the graph view (this example json is ai generated, but I'll add a new example when I get through a full book using the plugin) :)
+`<img width="1915" height="926" alt="image" src="https://github.com/user-attachments/assets/02419953-20d7-4343-a181-05186cd6ab02" />`
