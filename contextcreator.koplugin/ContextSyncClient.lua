@@ -99,7 +99,10 @@ function ContextSyncClient:pushBook(book_id, doc, profile, name, device)
     if device and device.id and device.id ~= "" then
         q = q .. "&device_id=" .. urlencode(device.id)
         if device.name and device.name ~= "" then q = q .. "&device_name=" .. urlencode(device.name) end
-        if device.chapter and device.chapter ~= "" then q = q .. "&device_chapter=" .. urlencode(device.chapter) end
+        --always send the current chapter, even when empty (e.g. front matter / before the first chapter):
+        --that lets the server clear a stale chapter instead of keeping the last one, which would otherwise
+        --re-anchor the web "jump to current" marker to that old chapter's spot even after reading back.
+        q = q .. "&device_chapter=" .. urlencode(device.chapter or "")
         if type(device.chapter_frac) == "number" then
             q = q .. "&device_chapter_frac=" .. urlencode(string.format("%.6f", device.chapter_frac))
         end

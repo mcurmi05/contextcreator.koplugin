@@ -389,14 +389,16 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
       {b.series ? `${b.series} · #${(b.series_index ?? 0) + 1}` : <span className="text-ink-faint italic">no series, click to set one</span>}
     </button>
   );
-  const ed = "w-full px-1.5 py-1 rounded-md border border-line bg-paper-card text-xs focus:outline-none focus:border-accent-ring";
+  const ed = "px-1.5 py-1 rounded-md border border-line bg-paper-card text-xs focus:outline-none focus:border-accent-ring";
   const seriesEditor = (b: DeviceCard) => (
     <div className="mt-2 pt-2 border-t border-line space-y-1.5" onPointerDown={(e) => e.stopPropagation()}>
-      <input className={ed} placeholder="series name (blank to clear)" value={seriesDraft} onChange={(e) => setSeriesDraft(e.target.value)} />
+      {/* series name (grows) with the index to its right (narrow), then the buttons underneath */}
       <div className="flex items-center gap-1.5">
+        <input className={`${ed} flex-1 min-w-0`} placeholder="series name (blank to clear)" value={seriesDraft} onChange={(e) => setSeriesDraft(e.target.value)} />
         <span className="text-xs text-ink-faint">#</span>
-        <input type="number" min={1} className={`${ed} w-16`} value={idxDraft} onChange={(e) => setIdxDraft(e.target.value)} />
-        <span className="flex-1" />
+        <input type="number" min={1} className={`${ed} w-10 shrink-0 no-spinner`} value={idxDraft} onChange={(e) => setIdxDraft(e.target.value)} />
+      </div>
+      <div className="flex items-center justify-end gap-2">
         <button className="text-xs text-ink-soft hover:text-ink" onClick={(e) => { e.stopPropagation(); setEditMeta(null); }}>Cancel</button>
         <button className="text-xs font-semibold text-accent-hover hover:underline" onClick={(e) => { e.stopPropagation(); void saveMeta(b.book_id); }}>Save</button>
       </div>
