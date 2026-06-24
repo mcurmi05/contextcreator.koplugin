@@ -1,6 +1,6 @@
 {
   "name": "contextcreator-frontend",
-  "version": "0.1.4-beta",
+  "version": "v0.1.4-beta",
   "private": true,
   "type": "module",
   "scripts": {
