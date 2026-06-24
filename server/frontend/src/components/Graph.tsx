@@ -692,7 +692,7 @@ export default function Graph({ doc, scrub, onScrub, selected, onSelect, hiddenT
             graph.hoverFocusOn ? "border-accent bg-accent text-white hover:bg-accent-hover"
                                : "border-line bg-paper-card/90 text-ink-soft hover:bg-paper-sunk"}`}
           aria-pressed={graph.hoverFocusOn}
-          title={graph.hoverFocusOn ? "Hover focus on — hovering a node dims unconnected ones. Click to turn off, or drag to move."
+          title={graph.hoverFocusOn ? "Hover focus on, hovering a node dims unconnected ones. Click to turn off, or drag to move."
                                     : "Hover focus off. Click to dim unconnected nodes on hover, or drag to move."}
           onClick={() => { if (clickGuardRef.current) return; onGraphChange({ ...graph, hoverFocusOn: !graph.hoverFocusOn }); }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">

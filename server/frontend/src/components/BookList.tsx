@@ -585,7 +585,7 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
       {deviceBooks.length === 0 && (
         <div className="rounded-xl border border-dashed border-line-strong bg-paper-card p-6 text-center mb-5">
           <p className="font-medium">No books yet</p>
-          <p className="text-sm text-ink-faint mt-1">Open a book in KOReader and sync — your library shows up here, ready to annotate.</p>
+          <p className="text-sm text-ink-faint mt-1">Open a book in KOReader and sync, your library shows up here ready to annotate.</p>
         </div>
       )}
 

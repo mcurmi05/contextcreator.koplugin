@@ -100,7 +100,7 @@ export default function Browse({ doc, scrub, selected, onSelect, onAddContext, o
 
         {/* everything added here is pinned to where the timeline is scrubbed to */}
         <p className="text-xs text-ink-faint">
-          New contexts, links and notes are pinned to the current timeline position — scrub the timeline to the right spot first.
+          New contexts, links and notes are pinned to the current timeline position, scrub the timeline to the right spot first.
         </p>
       </div>
       )}

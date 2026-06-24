@@ -50,7 +50,7 @@ export default function CoverPicker({ bookId, title, onClose, onChanged }: {
     <Modal title="Cover" onClose={onClose} maxWidth="max-w-md">
       <p className="text-sm text-ink-soft mb-3">
         Choose which cover to show{title ? <> for <strong>“{title}”</strong></> : null}. Each device that has synced
-        provides its own — pick one, or upload your own.
+        provides its own, pick one, or upload your own.
       </p>
       {!data ? (
         <p className="text-ink-faint text-sm">Loading…</p>
@@ -75,7 +75,7 @@ export default function CoverPicker({ bookId, title, onClose, onChanged }: {
             ))}
           </div>
           {covers.length === 0 && (
-            <p className="text-xs text-ink-faint mt-2">No synced covers yet — they appear here as your devices sync. You can upload one now.</p>
+            <p className="text-xs text-ink-faint mt-2">No synced covers yet, they appear here as your devices sync. You can upload one now.</p>
           )}
           {err && <p className="text-sm text-red-600 mt-2">{err}</p>}
           <div className="flex items-center gap-2 mt-4 whitespace-nowrap">

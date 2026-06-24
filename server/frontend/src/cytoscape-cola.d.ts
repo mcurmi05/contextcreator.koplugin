@@ -4,3 +4,6 @@ declare module "cytoscape-cola" {
   const ext: Ext;
   export default ext;
 }
+
+//app version injected at build time by vite's define (see vite.config.ts)
+declare const __APP_VERSION__: string;
