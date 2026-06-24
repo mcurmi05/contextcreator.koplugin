@@ -6,7 +6,8 @@ import {
   DEFAULT_PREFS, fetchHomePrefs, saveHomePrefs, applyManualOrder,
   pinsFor, withOrder, withPins, type HomePrefs, type HomeSort, type AuthorSort,
 } from "../lib/homePrefs";
-import { btn, input } from "../lib/ui";
+import { btn, btnAccent, input } from "../lib/ui";
+import CoverPicker from "./CoverPicker";
 import type { BookSummary, LibraryEntry } from "../lib/types";
 
 //the profile a card will open at: the remembered choice if it still exists, else the first profile
@@ -92,11 +93,20 @@ function Cover({ src, title }: { src?: string; title?: string }) {
   );
 }
 
-export default function BookList({ onOpen, showUnstarted = true, showProgress = true }: { onOpen: (bookId: string, profileName?: string) => void; showUnstarted?: boolean; showProgress?: boolean }) {
+export default function BookList({ onOpen, showUnstarted = true, showProgress = true, reloadSignal = 0,
+                                   coverSel = null, onCoverSelDone }: {
+  onOpen: (bookId: string, profileName?: string) => void;
+  showUnstarted?: boolean; showProgress?: boolean;
+  reloadSignal?: number;                                   //bumped by the app to force a covers refresh
+  coverSel?: { source: string; label: string } | null;    //cover selection mode (set from Settings)
+  onCoverSelDone?: () => void;
+}) {
   const [books, setBooks] = useState<BookSummary[] | null>(null);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [attachFor, setAttachFor] = useState<string | null>(null); //external book_id being attached
   const [error, setError] = useState("");
+  const selecting = !!coverSel;                            //cover selection mode active
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [picked, setPicked] = useState<Record<string, string>>({}); //book_id -> profile_id to open at
   const [prefs, setPrefs] = useState<HomePrefs>(DEFAULT_PREFS); //home layout (sort/group/order/pins), server-stored
   const [dragId, setDragId] = useState<string | null>(null);       //unit being dragged in manual mode
@@ -107,6 +117,7 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
   const [resetOpen, setResetOpen] = useState(false);               //whether the "reset order" menu is open
   const resetRef = useRef<HTMLDivElement>(null);
   const [dragHandle, setDragHandle] = useState<string | null>(null); //series whose grip is held (handle-only drag)
+  const [coverFor, setCoverFor] = useState<{ bookId: string; title?: string } | null>(null); //book whose cover picker is open
 
   useEffect(() => { void fetchHomePrefs().then(setPrefs); }, []);
   //close the reset-order menu when clicking anywhere outside it
@@ -201,6 +212,23 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
     const t = setInterval(tick, 5000); //pick up newly-synced books + library updates
     return () => { alive = false; clearInterval(t); };
   }, []);
+  //refresh immediately when the app signals a cover change (so covers update without a manual reload)
+  useEffect(() => { if (reloadSignal) void load(); }, [reloadSignal]);
+  //leaving / changing selection mode clears the ticked books
+  useEffect(() => { setSelectedIds(new Set()); }, [coverSel]);
+
+  function toggleSelected(id: string) {
+    setSelectedIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  //apply the selection-mode device cover to every ticked book, then leave selection mode
+  async function confirmSelection() {
+    if (!coverSel) return;
+    try {
+      await api("/api/covers/set-many", { method: "POST", body: JSON.stringify({ source: coverSel.source, book_ids: [...selectedIds] }) });
+      await load();
+    } catch (e) { setError((e as Error).message); }
+    onCoverSelDone?.();
+  }
 
   //adopt a device-library book (no notes yet): server makes a doc for it, then we open it
   async function adopt(bookId: string) {
@@ -340,9 +368,22 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
     </button>
   );
 
+  //a small "change cover" badge that overlays the cover thumbnail (shown on card hover). opens the cover
+  //picker — choose a device's cover or upload your own — without triggering the card's open action.
+  const coverEditButton = (bookId: string, title?: string) => (
+    <button onClick={(e) => { e.stopPropagation(); setCoverFor({ bookId, title }); }}
+            onPointerDown={(e) => e.stopPropagation()} title="Change cover" aria-label="Change cover"
+            className="absolute left-2 top-2 z-20 grid place-items-center w-6 h-6 rounded-full bg-paper-card/90 border border-line
+                       text-ink-soft hover:text-ink shadow-card opacity-0 group-hover/card:opacity-100 focus:opacity-100 transition">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+      </svg>
+    </button>
+  );
+
   //the series line: click it to hand-edit (covers the "koreader got the index wrong" case)
   const seriesRow = (b: DeviceCard) => (
-    <button className="block w-full text-left text-xs text-ink-soft truncate hover:text-accent-hover transition"
+    <button className="block w-full text-center text-xs text-ink-soft truncate hover:text-accent-hover transition"
             title="Click to edit series" onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); startEditMeta(b); }}>
       {b.series ? `${b.series} · #${(b.series_index ?? 0) + 1}` : <span className="text-ink-faint italic">no series, click to set one</span>}
@@ -378,7 +419,8 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
   //a single book card. draggable (manual flat mode) and pinnable only when the book itself is the unit.
   //dragging is suspended while its series is being edited so the inputs work normally.
   const renderCard = (b: DeviceCard, draggable: boolean, pinnable: boolean) => {
-    const canDrag = draggable && editMeta !== b.book_id;
+    const canDrag = draggable && editMeta !== b.book_id && !selecting;
+    const sel = selectedIds.has(b.book_id);
     return (
     <div key={b.book_id} ref={registerFlipBooks(b.book_id)}
          draggable={canDrag || undefined}
@@ -386,11 +428,21 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
          onDragEnd={canDrag ? clearDrag : undefined}
          onDragOver={canDrag ? (e) => { e.preventDefault(); dragOver(e, bookIds, b.book_id); } : undefined}
          onDrop={canDrag ? (e) => { e.preventDefault(); dropOn(e, bookIds, b.book_id); } : undefined}
-         className={`group/card relative w-full rounded-xl border border-line bg-paper-card p-3 shadow-card transition hover:shadow-pop hover:border-accent-ring ${
+         className={`group/card relative w-full rounded-xl border bg-paper-card p-3 shadow-card transition hover:shadow-pop ${
+           selecting && sel ? "border-accent ring-2 ring-accent-ring" : "border-line hover:border-accent-ring"} ${
            canDrag ? "cursor-move" : "cursor-pointer"} ${dragId === b.book_id ? "opacity-40 ring-2 ring-accent-ring" : ""} ${b.started ? "" : "opacity-65 hover:opacity-100"}`}>
-      {pinnable && <div className="absolute top-1 right-1 z-10">{pinToggle(b.book_id, prefs.pinBooks.includes(b.book_id))}</div>}
+      {selecting && (
+        <div className="absolute top-1 right-1 z-20">
+          <span className={`grid place-items-center w-5 h-5 rounded-full border shrink-0 transition ${
+            sel ? "bg-accent border-accent text-white" : "bg-paper-card/90 border-line-strong text-transparent"}`}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+          </span>
+        </div>
+      )}
+      {pinnable && !selecting && <div className="absolute top-0 right-1 z-10">{pinToggle(b.book_id, prefs.pinBooks.includes(b.book_id))}</div>}
+      {!selecting && coverEditButton(b.book_id, b.title)}
       <button className="group flex w-full items-start gap-2.5 text-left"
-              onClick={() => (b.started ? open(b) : adopt(b.book_id))}>
+              onClick={() => (selecting ? toggleSelected(b.book_id) : b.started ? open(b) : adopt(b.book_id))}>
         <Cover src={b.cover} title={b.title} />
         <span className="min-w-0 flex-1">
           <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
@@ -412,7 +464,7 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
         <div className="mt-2 pt-2 border-t border-line">
           <button className="text-xs font-medium text-accent-hover hover:underline transition"
                   onClick={() => adopt(b.book_id)}>+ start contexts</button>
-          <div className="mt-1">{seriesRow(b)}</div>
+          <div className="mt-2 pt-2 border-t border-line">{seriesRow(b)}</div>
         </div>
       )}
     </div>
@@ -444,10 +496,10 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
                   onMouseDown={() => setDragHandle(series)} onMouseUp={() => setDragHandle(null)}>⠿</span>
           )}
           {pinToggle(series, prefs.pinSeries.includes(series))}
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft leading-none">
             {series || "Not in a series"}
           </span>
-          <span className="text-xs text-ink-faint tabular-nums">{list.length}</span>
+          <span className="text-xs text-ink-faint tabular-nums leading-none">{list.length}</span>
         </div>
         <div className={gridClass}>
           {list.map((b) => renderCard(b, false, false))}
@@ -461,6 +513,18 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
   return (
     <div>
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+
+      {selecting && (
+        //sticky banner while picking books to set to a device's cover — tap cards to tick them, then Confirm
+        <div className="sticky top-0 z-30 -mx-4 mb-3 px-4 py-2.5 border-b border-line bg-paper/95 backdrop-blur flex items-center gap-3 flex-wrap">
+          <span className="text-sm">
+            Tap books to set their cover to <strong>{coverSel?.label}</strong> · <span className="text-ink-soft">{selectedIds.size} selected</span>
+          </span>
+          <span className="flex-1" />
+          <button className={btn} onClick={() => onCoverSelDone?.()}>Cancel</button>
+          <button className={btnAccent} disabled={selectedIds.size === 0} onClick={confirmSelection}>Confirm</button>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-faint">Your books</h2>
@@ -552,8 +616,18 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
         ) : (
           <div className="flex flex-wrap items-start gap-2.5">
             {externalBooks.map((b) => (
-              <div key={b.book_id} className="w-64 rounded-xl border border-line bg-paper-card p-4 shadow-card">
-                <button className="group flex w-full items-start gap-2.5 text-left" onClick={() => open(b)}>
+              <div key={b.book_id} className={`group/card relative w-64 rounded-xl border bg-paper-card p-4 shadow-card ${
+                  selecting && selectedIds.has(b.book_id) ? "border-accent ring-2 ring-accent-ring" : "border-line"}`}>
+                {selecting && (
+                  <div className="absolute top-1 right-1 z-20">
+                    <span className={`grid place-items-center w-5 h-5 rounded-full border transition ${
+                      selectedIds.has(b.book_id) ? "bg-accent border-accent text-white" : "bg-paper-card/90 border-line-strong text-transparent"}`}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                    </span>
+                  </div>
+                )}
+                {!selecting && coverEditButton(b.book_id, b.title)}
+                <button className="group flex w-full items-start gap-2.5 text-left" onClick={() => (selecting ? toggleSelected(b.book_id) : open(b))}>
                   <Cover src={b.cover} title={b.title} />
                   <span className="min-w-0 flex-1">
                     <strong className="block truncate group-hover:text-accent-hover transition">{b.title || "Imported contexts"}</strong>
@@ -596,6 +670,11 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
           </div>
         )}
       </div>
+
+      {coverFor && (
+        <CoverPicker bookId={coverFor.bookId} title={coverFor.title}
+                     onClose={() => setCoverFor(null)} onChanged={() => void load()} />
+      )}
     </div>
   );
 }

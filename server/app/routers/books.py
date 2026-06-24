@@ -3,6 +3,7 @@
 #"default"). book-level metadata (title/series) and the shared reading position live on the Book itself.
 import io
 import json
+import secrets
 import time
 import zipfile
 
@@ -10,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from ..services import docops, profiles
+from ..services import covers, docops, profiles
 from ..core.db import get_session
 from ..core.deps import get_current_user
 from ..models import Book, LibraryEntry, Profile, User
@@ -49,6 +50,23 @@ class ProfileRename(BaseModel):
 class BookMeta(BaseModel):
     series: str | None = None       #grouping name; "" clears it
     series_index: int | None = None  #0-based position (the home page shows it +1)
+
+
+class CoverChoiceIn(BaseModel):
+    source: str = ""  #which cover source to show (a device id / "custom"); "" = automatic (freshest)
+
+
+class CustomCoverIn(BaseModel):
+    cover: str  #a data: url for the uploaded cover
+
+
+class SetAllCoversIn(BaseModel):
+    source: str  #a device source to apply to every book that has a cover from it
+
+
+class SetManyCoversIn(BaseModel):
+    source: str            #a device source
+    book_ids: list[str]    #the chosen books to apply it to
 
 
 def _get_row(session, user, book_id) -> Book:
@@ -170,6 +188,86 @@ def list_book_devices(book_id: str, user: User = Depends(get_current_user), sess
     return [{"device_id": r.device_id, "device_name": r.device_name,
              "reading_progress": r.reading_progress, "chapter": r.chapter,
              "chapter_frac": r.chapter_frac, "updated": r.updated} for r in rows]
+
+
+@router.get("/covers")
+def covers_overview(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #account-wide cover picture for the settings panel: device sources + each book's options & current
+    return covers.overview(session, user.id)
+
+
+@router.post("/covers/set-all")
+def set_all_covers(body: SetAllCoversIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #point every book that has a cover from this device at it (one bulk action from settings)
+    n = covers.set_all_to_source(session, user.id, body.source)
+    session.commit()
+    return {"updated": n}
+
+
+@router.post("/covers/set-many")
+def set_many_covers(body: SetManyCoversIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #point the chosen books at this device's cover (used by the home-page selection mode + Confirm)
+    n = covers.set_many_to_source(session, user.id, body.source, body.book_ids or [])
+    session.commit()
+    return {"updated": n}
+
+
+#the book must be something the user actually has (a started Book or a device library entry) before we'll
+#read/change its covers. covers + the choice are user+book scoped, independent of profiles.
+def _cover_book(session, user, book_id):
+    if session.exec(select(Book).where(Book.user_id == user.id, Book.book_id == book_id)).first():
+        return
+    if session.exec(select(LibraryEntry).where(LibraryEntry.user_id == user.id, LibraryEntry.book_id == book_id)).first():
+        return
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="book not found")
+
+
+@router.get("/books/{book_id}/covers")
+def list_covers(book_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #the cover options for this book (one per device that synced + any custom upload) and which is shown
+    _cover_book(session, user, book_id)
+    return covers.list_for_book(session, user.id, book_id)
+
+
+@router.put("/books/{book_id}/cover")
+def choose_cover(book_id: str, body: CoverChoiceIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #pick which source's cover to show
+    _cover_book(session, user, book_id)
+    covers.set_choice(session, user.id, book_id, body.source)
+    cover = covers.resolve(session, user.id, book_id)
+    session.commit()
+    return {"cover": cover}
+
+
+@router.post("/books/{book_id}/cover/custom")
+def upload_cover(book_id: str, body: CustomCoverIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #add a custom cover (a data: url, downscaled client-side) under its own source, and switch to it. each
+    #upload is a separate source, so a book can hold as many custom covers as the user wants.
+    _cover_book(session, user, book_id)
+    data = (body.cover or "").strip()
+    if not data.startswith("data:"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expected a data: url")
+    if len(data) > 4_000_000:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="image too large")
+    source = covers.CUSTOM_PREFIX + secrets.token_hex(4)
+    covers.record_cover(session, user.id, book_id, source, data, label="Custom")
+    covers.set_choice(session, user.id, book_id, source)
+    cover = covers.resolve(session, user.id, book_id)
+    session.commit()
+    return {"cover": cover}
+
+
+@router.delete("/books/{book_id}/cover/custom/{source}")
+def delete_custom_cover(book_id: str, source: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #remove one custom cover (only custom uploads are removable; device covers just re-sync). if it was the
+    #shown one, the choice resets and the book falls back to its first-synced cover.
+    _cover_book(session, user, book_id)
+    if not covers.is_custom(source):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="only custom covers can be removed")
+    covers.remove_source(session, user.id, book_id, source)
+    cover = covers.resolve(session, user.id, book_id)
+    session.commit()
+    return {"cover": cover}
 
 
 @router.get("/books/{book_id}")

@@ -52,6 +52,10 @@ export default function App() {
   const [theme, setThemeState] = useState<Theme>(loadTheme);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [route, navigate] = useRoute();
+  //home-page cover selection mode: when set from Settings, the home page lets you tick books and Confirm
+  //to set them all to this device's cover. dataEpoch bumps to force the home list to refresh covers live.
+  const [coverSel, setCoverSel] = useState<{ source: string; label: string } | null>(null);
+  const [dataEpoch, setDataEpoch] = useState(0);
 
   //canonicalise the bare root ("/") to "/home" so visiting the server address lands on a real route
   useEffect(() => {
@@ -94,10 +98,11 @@ export default function App() {
         <button className={btn} onClick={logout}>Log out</button>
       </header>
 
-      <main className="flex-1 min-h-0">
+      <main className="flex-1 min-h-0 overflow-y-auto">
         {route.name === "home" ? (
           <div className="max-w-6xl mx-auto px-4 py-8">
-            <BookList showUnstarted={theme.showUnstarted} showProgress={theme.showProgress}
+            <BookList showUnstarted={theme.showUnstarted} showProgress={theme.showProgress} reloadSignal={dataEpoch}
+                      coverSel={coverSel} onCoverSelDone={() => setCoverSel(null)}
                       onOpen={(id, profileName) => navigate({ name: "book", bookId: id, profileName })} />
           </div>
         ) : (
@@ -110,7 +115,11 @@ export default function App() {
 
       {settingsOpen && me && (
         <Settings me={me} theme={theme} onThemeChange={setTheme}
-                  onAccountChanged={checkAuth} onClose={() => setSettingsOpen(false)} />
+                  onAccountChanged={checkAuth} onClose={() => setSettingsOpen(false)}
+                  onCoversChanged={() => setDataEpoch((e) => e + 1)}
+                  onStartCoverSelection={(source, label) => {
+                    setSettingsOpen(false); navigate({ name: "home" }); setCoverSel({ source, label });
+                  }} />
       )}
     </div>
   );

@@ -10,11 +10,13 @@ interface UserRow { id: number; username: string; is_admin: boolean }
 
 //settings modal: appearance (live theming), account (change own credentials), and for the admin,
 //user management. appearance is browser-local, account/users hit the server.
-export default function Settings({ me, theme, onThemeChange, onAccountChanged, onClose }: {
+export default function Settings({ me, theme, onThemeChange, onAccountChanged, onClose, onCoversChanged, onStartCoverSelection }: {
   me: User; theme: Theme;
   onThemeChange: (t: Theme) => void; onAccountChanged: () => void; onClose: () => void;
+  onCoversChanged: () => void;                                   //a cover changed -> refresh the home list
+  onStartCoverSelection: (source: string, label: string) => void; //enter home-page selection mode for a device
 }) {
-  const [tab, setTab] = useState<"appearance" | "graph" | "data" | "account">("appearance");
+  const [tab, setTab] = useState<"appearance" | "graph" | "covers" | "devices" | "data" | "account">("appearance");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -27,6 +29,8 @@ export default function Settings({ me, theme, onThemeChange, onAccountChanged, o
   const tabs = [
     { id: "appearance", label: "Appearance" },
     { id: "graph", label: "Graph" },
+    { id: "covers", label: "Covers" },
+    { id: "devices", label: "Devices" },
     { id: "data", label: "Import / export" },
     { id: "account", label: me.is_admin ? "Account & users" : "Account" },
   ] as const;
@@ -40,7 +44,7 @@ export default function Settings({ me, theme, onThemeChange, onAccountChanged, o
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 animate-fadein" onClick={onClose}>
-      <div className="w-full max-w-lg max-h-[85vh] overflow-auto rounded-2xl border border-line bg-paper-card shadow-pop animate-pop"
+      <div className="w-full max-w-2xl max-h-[85vh] overflow-auto rounded-2xl border border-line bg-paper-card shadow-pop animate-pop"
            onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 z-10 px-5 pt-3 border-b border-line bg-paper-card/95 backdrop-blur">
           <div className="flex items-center gap-2">
@@ -62,6 +66,8 @@ export default function Settings({ me, theme, onThemeChange, onAccountChanged, o
         <div className="p-5 flex flex-col gap-7">
           {tab === "appearance" && <Appearance theme={theme} set={set} onLogoFile={onLogoFile} />}
           {tab === "graph" && <GraphSettings theme={theme} set={set} />}
+          {tab === "covers" && <CoversSettings onChanged={onCoversChanged} onStartSelection={onStartCoverSelection} />}
+          {tab === "devices" && <DevicesSettings />}
           {tab === "data" && <DataSection theme={theme} onThemeChange={onThemeChange} />}
           {tab === "account" && <Account onChanged={onAccountChanged} />}
           {tab === "account" && me.is_admin && <Users />}
@@ -220,6 +226,152 @@ function GraphSettings({ theme, set }: { theme: Theme; set: (p: Partial<Theme>) 
       <div>
         <button className={btn} onClick={() => set({ graph: { ...DEFAULT_GRAPH } })}>Reset graph layout</button>
       </div>
+    </Section>
+  );
+}
+
+interface CovDevice { source: string; label: string }
+interface CovSrc { source: string; label: string }
+interface CovBook { book_id: string; title: string; current: string | null; sources: CovSrc[] }
+interface CovOverview { devices: CovDevice[]; books: CovBook[] }
+
+//a small circle that fills with a tick when selected (radio style)
+function PickDot({ selected }: { selected: boolean }) {
+  return (
+    <span className={`grid place-items-center w-4 h-4 rounded-full border shrink-0 transition ${
+      selected ? "bg-accent border-accent text-white" : "border-line-strong text-transparent"}`}>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5"
+           strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+    </span>
+  );
+}
+
+//bulk cover management (device covers only — custom uploads are handled on the home page picker). set
+//every book to one device's covers, set a chosen selection via the home page, or pick per book.
+function CoversSettings({ onChanged, onStartSelection }: {
+  onChanged: () => void; onStartSelection: (source: string, label: string) => void;
+}) {
+  const [data, setData] = useState<CovOverview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const load = () => api<CovOverview>("/api/covers").then(setData).catch(() => setData({ devices: [], books: [] }));
+  useEffect(() => { void load(); }, []);
+
+  async function setAll(d: CovDevice) {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api<{ updated: number }>("/api/covers/set-all", { method: "POST", body: JSON.stringify({ source: d.source }) });
+      setMsg({ ok: true, text: `Set ${r.updated} book${r.updated === 1 ? "" : "s"} to ${d.label}.` });
+      await load(); onChanged();
+    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+    finally { setBusy(false); }
+  }
+  async function pick(b: CovBook, source: string) {
+    setData((cur) => cur && { ...cur, books: cur.books.map((x) => x.book_id === b.book_id ? { ...x, current: source } : x) });
+    try { await api(`/api/books/${encodeURIComponent(b.book_id)}/cover`, { method: "PUT", body: JSON.stringify({ source }) }); onChanged(); }
+    catch { void load(); }
+  }
+
+  return (
+    <Section title="Covers">
+      {!data ? (
+        <p className="text-ink-faint text-sm">Loading…</p>
+      ) : data.books.length === 0 ? (
+        <p className="text-sm text-ink-faint">No synced covers yet. As your devices sync, their covers show up here and you can choose which device's cover each book uses.</p>
+      ) : (
+        <>
+          {data.devices.length > 1 && (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-ink-soft shrink-0 whitespace-nowrap">Set every book to:</span>
+                {data.devices.map((d) => (
+                  <button key={d.source} className={btn} disabled={busy} onClick={() => setAll(d)}>{d.label}</button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-ink-soft shrink-0 whitespace-nowrap">Set a selection to:</span>
+                {data.devices.map((d) => (
+                  <button key={d.source} className={btn} onClick={() => onStartSelection(d.source, d.label)}>{d.label}</button>
+                ))}
+              </div>
+              <p className="text-xs text-ink-faint">"Set a selection" takes you to the home page to tick the books you want, then Confirm.</p>
+            </div>
+          )}
+          {msg && <span className={`text-sm ${msg.ok ? "text-green-700" : "text-red-600"}`}>{msg.text}</span>}
+          <p className="text-xs text-ink-faint -mt-1">Or choose per book, tap a device to use its cover for that book.</p>
+          <div className="rounded-lg border border-line divide-y divide-line max-h-[44vh] overflow-auto">
+            {data.books.map((b) => (
+              <div key={b.book_id} className="flex items-center gap-3 px-3 py-2">
+                <span className="flex-1 min-w-0 truncate text-sm">{b.title}</span>
+                <div className="flex flex-wrap items-center justify-end gap-1 shrink-0">
+                  {b.sources.map((s) => (
+                    <button key={s.source} onClick={() => pick(b, s.source)} title={`Use ${s.label}`}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-paper-sunk transition">
+                      <PickDot selected={b.current === s.source} />
+                      <span className="text-xs text-ink-soft">{s.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Section>
+  );
+}
+
+interface DeviceRow { device_id: string; name: string }
+
+//rename the devices that have synced to this account. the name shows everywhere the device appears
+//(timeline "jump to current", cover picker, cover settings) and must be unique.
+function DevicesSettings() {
+  const [rows, setRows] = useState<DeviceRow[] | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const load = () => api<DeviceRow[]>("/api/devices")
+    .then((r) => { setRows(r); setDrafts(Object.fromEntries(r.map((d) => [d.device_id, d.name]))); })
+    .catch(() => setRows([]));
+  useEffect(() => { void load(); }, []);
+
+  async function save(id: string) {
+    const name = (drafts[id] || "").trim();
+    if (!name) return;
+    setMsg(null);
+    try {
+      await api(`/api/devices/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ name }) });
+      setMsg({ ok: true, text: "Saved." });
+      await load();
+    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+  }
+
+  return (
+    <Section title="Devices">
+      {!rows ? (
+        <p className="text-ink-faint text-sm">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-ink-faint">No devices have synced yet. When KOReader syncs, its device shows up here and you can rename it.</p>
+      ) : (
+        <>
+          <p className="text-xs text-ink-faint">Rename a device to change how it appears everywhere (the timeline's "jump to current", the cover picker). Names must be unique.</p>
+          <div className="flex flex-col gap-2">
+            {rows.map((d) => {
+              const draft = drafts[d.device_id] ?? d.name;
+              return (
+                <div key={d.device_id} className="flex items-center gap-2">
+                  <input className={`${input} flex-1`} value={draft} aria-label="Device name"
+                         onChange={(e) => setDrafts((m) => ({ ...m, [d.device_id]: e.target.value }))}
+                         onKeyDown={(e) => e.key === "Enter" && save(d.device_id)} />
+                  <button className={btn} disabled={!draft.trim() || draft === d.name} onClick={() => save(d.device_id)}>Save</button>
+                </div>
+              );
+            })}
+          </div>
+          {msg && <span className={`text-sm ${msg.ok ? "text-green-700" : "text-red-600"}`}>{msg.text}</span>}
+        </>
+      )}
     </Section>
   );
 }

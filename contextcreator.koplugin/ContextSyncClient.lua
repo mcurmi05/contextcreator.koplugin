@@ -129,10 +129,17 @@ function ContextSyncClient:deleteProfile(book_id, profile_id)
 end
 
 --report the device's book catalog (a list of { book_id, title, authors, cover? }) so the web ui can
---offer to start contexts for books that have no notes yet, and show cover art. cover is a data: url,
---sent only the first time a book is seen.
-function ContextSyncClient:pushLibrary(books)
-    return self:request("POST", "/api/sync/library", rapidjson.array(books))
+--offer to start contexts for books that have no notes yet, and show cover art. cover is a data: url.
+--device (optional) is { id, name }: covers are stored per device on the server so the web can let the
+--user choose which device's cover to show (a grayscale e-ink one vs a colour one), rather than the last
+--sync silently winning.
+function ContextSyncClient:pushLibrary(books, device)
+    local q = ""
+    if device and device.id and device.id ~= "" then
+        q = "?device_id=" .. urlencode(device.id)
+        if device.name and device.name ~= "" then q = q .. "&device_name=" .. urlencode(device.name) end
+    end
+    return self:request("POST", "/api/sync/library" .. q, rapidjson.array(books))
 end
 
 return ContextSyncClient

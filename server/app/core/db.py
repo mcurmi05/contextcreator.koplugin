@@ -47,6 +47,12 @@ def _migrate():
                 conn.exec_driver_sql("ALTER TABLE deviceposition ADD COLUMN chapter VARCHAR DEFAULT ''")
             if "chapter_frac" not in dp_cols:
                 conn.exec_driver_sql("ALTER TABLE deviceposition ADD COLUMN chapter_frac FLOAT")
+        #drop the old generic "synced cover" source: cover sources are now one-per-device plus custom
+        #uploads, so this legacy seed is removed. each device re-supplies its own cover on its next sync
+        #(the displayed cover is left as-is until then).
+        bc_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(bookcover)")}
+        if bc_cols:  #table exists (created by create_all above)
+            conn.exec_driver_sql("DELETE FROM bookcover WHERE source = 'synced'")
         #backfill covers onto started books that lost theirs before ensure_book learned to carry the cover
         #over when a library book first gains contexts. only fills an empty cover from a matching library
         #entry that actually has one, so it's idempotent and never clobbers a cover already set.

@@ -7,7 +7,7 @@ import secrets
 
 from sqlmodel import select
 
-from . import docops
+from . import covers, devices, docops
 from ..models import Book, DevicePosition, LibraryEntry, Profile, ProfileTombstone
 from .sync import _normalize, merge, new_doc
 
@@ -69,8 +69,8 @@ def record_device_position(session, user_id, book_id, device_id, reading_progres
         session.add(row)
     row.reading_progress = rp
     row.updated = docops.now()
-    if device_name and device_name.strip():
-        row.device_name = device_name.strip()
+    #a user-set device name overrides the reported one, so a rename sticks across syncs
+    row.device_name = devices.resolve_name(session, user_id, device_id, (device_name or "").strip())
     #chapter is sent on every sync; treat empty as "unknown" but always refresh frac alongside it
     if chapter is not None:
         row.chapter = chapter.strip()
@@ -143,8 +143,10 @@ def add_external_profile(session, user_id, book, doc, *, name):
                         doc_json=json.dumps(_without_cover(doc)), updated=doc["updated"]))
     #carry a cover over to a coverless external book, so an imported copy can supply the artwork
     cover = (doc.get("book") or {}).get("cover")
-    if cover and not (book.cover or ""):
-        book.cover = cover
+    if cover:
+        covers.record_cover(session, user_id, book.book_id, "imported", cover, label="Imported file")
+        if not (book.cover or ""):
+            book.cover = cover
     book.updated = max(book.updated or 0, doc["updated"])
     return pid
 
@@ -166,6 +168,8 @@ def create_external_book(session, user_id, doc, *, title, authors, origin_id, pr
     session.add(Profile(user_id=user_id, book_id=bid, profile_id=DEFAULT_PID,
                         name=(profile_name or "Main").strip() or "Main",
                         doc_json=json.dumps(_without_cover(doc)), updated=doc["updated"]))
+    if meta.get("cover"):  #record it as a selectable source so the cover picker can offer it
+        covers.record_cover(session, user_id, bid, "imported", meta["cover"], label="Imported file")
     return book
 
 

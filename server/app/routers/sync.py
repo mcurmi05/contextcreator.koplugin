@@ -2,12 +2,10 @@
 #profile's book doc, the server additively merges it into what it has, persists the result, and hands the
 #merged doc back for the device to write locally. a book can hold several named profiles; the device picks
 #which it's reading/writing and passes it as ?profile= (default "default"). all scoped to the token's user.
-import base64
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
-from ..services import profiles
+from ..services import covers, devices, profiles
 from ..core.db import get_session
 from ..core.deps import get_sync_user
 from ..models import Book, LibraryEntry, Profile, User
@@ -15,54 +13,6 @@ from ..services.profiles import DEFAULT_PID
 from ..services.sync import new_doc
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
-
-#a grayscale e-ink device (e.g. a Kobo) renders + extracts covers in black & white, while a colour screen
-#(e.g. KOReader on a mac) extracts them in colour. covers sync last-write-wins, so without this a Kobo
-#sync would overwrite the colour covers with grayscale ones. we tell them apart by the jpeg's component
-#count (1 = grayscale, 3 = colour) and never let a grayscale cover replace a colour one.
-_SOF_MARKERS = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
-
-
-def _jpeg_is_color(data_url: str) -> bool:
-    #scan a data: jpeg for its SOF marker and read the component count. unknown/odd data counts as colour
-    #so a real cover is never wrongly blocked.
-    if not data_url or not isinstance(data_url, str) or "," not in data_url:
-        return True
-    try:
-        raw = base64.b64decode(data_url.split(",", 1)[1])
-    except Exception:
-        return True
-    i, n = 2, len(raw)  # skip the SOI marker (FFD8)
-    while i + 1 < n:
-        if raw[i] != 0xFF:
-            i += 1
-            continue
-        while i + 1 < n and raw[i + 1] == 0xFF:  # collapse fill bytes
-            i += 1
-        if i + 1 >= n:
-            break
-        marker = raw[i + 1]
-        if marker == 0x00 or marker == 0xD8 or marker == 0xD9 or 0xD0 <= marker <= 0xD7:
-            i += 2  # standalone / stuffed marker, no length field
-            continue
-        if marker in _SOF_MARKERS:
-            return i + 9 >= n or raw[i + 9] >= 3  # components count sits at +9 in the SOF segment
-        if i + 3 >= n:
-            break
-        seglen = (raw[i + 2] << 8) | raw[i + 3]
-        if seglen < 2:
-            break
-        i += 2 + seglen
-    return True
-
-
-def _should_replace_cover(existing: str, incoming: str, incoming_color: bool) -> bool:
-    #a colour cover always wins; a grayscale cover is only used when there isn't already a colour one
-    if not incoming:
-        return False
-    if incoming_color:
-        return True
-    return not (existing and _jpeg_is_color(existing))
 
 
 @router.get("/books")
@@ -118,18 +68,23 @@ def delete_sync_profile(book_id: str, profile_id: str, user: User = Depends(get_
 
 
 @router.post("/library")
-def push_library(body: list[dict], user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
+def push_library(body: list[dict], device_id: str | None = None, device_name: str | None = None,
+                 user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
     #the device reports its read-history catalog (book_id + title) so the web ui can offer to start a
-    #context for a book that has no notes yet. upsert by book_id, scoped to the user.
+    #context for a book that has no notes yet. upsert by book_id, scoped to the user. each device's cover
+    #is stored under its own source so a grayscale device can't clobber a colour one — the user picks which
+    #to show on the web (see services/covers.py); we ask a device only for covers IT hasn't supplied yet.
+    src = device_id or "device"  #fallback source for older clients that don't identify their device
+    label = devices.resolve_name(session, user.id, src, device_name)  #user-set device name wins
+    have_cover = covers.book_ids_with_source(session, user.id, src)  #books this device already covered
     seen = 0
-    need_cover = []  #book_ids the server still has no cover for, so the device knows to (re)send one
+    need_cover = []
     for it in body or []:
         bid = it.get("book_id")
         if not bid:
             continue
         seen += 1
         cover = it.get("cover") or ""
-        incoming_color = _jpeg_is_color(cover) if cover else False
         series = it.get("series") or ""
         sidx = int(it.get("series_index") or 0)
         row = session.exec(
@@ -138,29 +93,21 @@ def push_library(body: list[dict], user: User = Depends(get_sync_user), session:
         if row:
             row.title = it.get("title") or row.title
             row.authors = it.get("authors") or row.authors
-            if _should_replace_cover(row.cover or "", cover, incoming_color):
-                row.cover = cover
-            #only set series when the device actually sent one, so a later metadata-less push (e.g. a book
-            #whose cover is already done) doesn't wipe a series we resolved earlier
+            #only set series when the device actually sent one, so a later metadata-less push doesn't wipe it
             if series:
                 row.series = series
                 row.series_index = sidx
         else:
             row = LibraryEntry(user_id=user.id, book_id=bid, title=it.get("title") or "",
-                               authors=it.get("authors") or "", cover=cover, series=series, series_index=sidx)
+                               authors=it.get("authors") or "", series=series, series_index=sidx)
             session.add(row)
-        #a book with notes lives as a Book (and is filtered out of /api/library), so push the cover there too.
-        #a freshly extracted cover overwrites the old one — unless it's a grayscale cover that would replace a
-        #colour one (a grayscale device can't improve on a colour cover synced from a colour screen).
-        book = session.exec(
-            select(Book).where(Book.user_id == user.id, Book.book_id == bid)
-        ).first()
-        if book and _should_replace_cover(book.cover or "", cover, incoming_color):
-            book.cover = cover
-        #tell the device to (re)send a cover when we have none, on either the library entry or the started
-        #book. this makes covers self-heal after a server wipe/restore: the device's local "already sent"
-        #memory wouldn't otherwise re-send to the same url, but an empty server here asks for them again.
-        if not ((row.cover or "") or (book.cover if book else "")):
+        if cover:
+            covers.record_cover(session, user.id, bid, src, cover, label=label)
+            covers.resolve(session, user.id, bid)  #refresh the shown cover on the library entry / book
+            have_cover.add(bid)
+        #ask this device to (re)send a cover only for books it hasn't supplied one for (self-heals a wiped
+        #server; a colour device and a grayscale device each fill in their own source independently)
+        if bid not in have_cover:
             need_cover.append(bid)
     session.commit()
     return {"ok": True, "count": seen, "need_cover": need_cover}

@@ -4,8 +4,8 @@ import { btn, btnAccent, btnDanger } from "../lib/ui";
 //a small centred modal matching the app's surfaces (same backdrop/animation as the Settings dialog).
 //closes on Escape or a backdrop click. used for the graph's "Add context" / "Add relationship" inputs
 //instead of the browser's window.prompt.
-export default function Modal({ title, onClose, children }: {
-  title: string; onClose: () => void; children: React.ReactNode;
+export default function Modal({ title, onClose, children, maxWidth = "max-w-sm" }: {
+  title: string; onClose: () => void; children: React.ReactNode; maxWidth?: string;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -15,7 +15,7 @@ export default function Modal({ title, onClose, children }: {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 animate-fadein" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl border border-line bg-paper-card shadow-pop animate-pop p-5"
+      <div className={`w-full ${maxWidth} rounded-2xl border border-line bg-paper-card shadow-pop animate-pop p-5`}
            onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-3">
           <strong className="text-base">{title}</strong>

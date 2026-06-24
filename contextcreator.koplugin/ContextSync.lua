@@ -438,7 +438,8 @@ function ContextSync:_pushCatalog(books)
         payload[#payload + 1] = item
     end
     local s = self:settings()
-    local ok, resp = ContextSyncClient:new(s.server, s.username, s.password):pushLibrary(payload)
+    --identify this device so the server keeps its covers separate (the web lets the user pick which to show)
+    local ok, resp = ContextSyncClient:new(s.server, s.username, s.password):pushLibrary(payload, self:deviceInfo())
     if not ok and resp == 401 then self:authFailed() end
     if ok and #fresh > 0 then self:markCoversTried(fresh) end
     --adopt the server's list of covers it's still missing, so the next drain pass re-sends those. this is
