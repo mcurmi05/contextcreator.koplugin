@@ -1,0 +1,2687 @@
+{
+  "schema": 3,
+  "book": {
+    "id": "b11a945d0cc026bc3fc4f040db5edc21",
+    "title": "The Way of Kings",
+    "authors": "Brandon Sanderson",
+    "series_index": 0,
+    "toc": [
+      {
+        "progress": 0.01794404450621789,
+        "title": "Prelude to the Stormlight Archive"
+      },
+      {
+        "progress": 0.02151231658971472,
+        "title": "Book One: The Way of Kings"
+      },
+      {
+        "progress": 0.022689516321269174,
+        "title": "Prologue: To Kill"
+      },
+      {
+        "progress": 0.03611839475430998,
+        "title": "Part One: Above Silence"
+      },
+      {
+        "progress": 0.03658707427360176,
+        "title": "1: STORMBLESSED"
+      },
+      {
+        "progress": 0.04776497079004404,
+        "title": "2: HONOR IS DEAD"
+      },
+      {
+        "progress": 0.06038484529541845,
+        "title": "3: CITY OF BELLS"
+      },
+      {
+        "progress": 0.07205709235333595,
+        "title": "4: THE SHATTERED PLAINS"
+      },
+      {
+        "progress": 0.08216414051584085,
+        "title": "5: HERETIC"
+      },
+      {
+        "progress": 0.09291516460626154,
+        "title": "6: BRIDGE FOUR"
+      },
+      {
+        "progress": 0.11042646902424444,
+        "title": "7: ANYTHING REASONABLE"
+      },
+      {
+        "progress": 0.1252342480774238,
+        "title": "8: NEARER THE FLAME"
+      },
+      {
+        "progress": 0.1428372347174904,
+        "title": "9: DAMNATION"
+      },
+      {
+        "progress": 0.14903641984590052,
+        "title": "10: STORIES OF SURGEONS"
+      },
+      {
+        "progress": 0.15467891052181854,
+        "title": "11: DROPLETS"
+      },
+      {
+        "progress": 0.1630586656202669,
+        "title": "Interludes"
+      },
+      {
+        "progress": 0.1635273451395587,
+        "title": "1-1: ISHIKK"
+      },
+      {
+        "progress": 0.16845031373656397,
+        "title": "1-2: NAN BALAT"
+      },
+      {
+        "progress": 0.17160711600734924,
+        "title": "1-3: THE GLORY OF IGNORANCE"
+      },
+      {
+        "progress": 0.17677065875510212,
+        "title": "Part Two: The Illuminating Storms"
+      },
+      {
+        "progress": 0.17802267117987686,
+        "title": "12: UNITY"
+      },
+      {
+        "progress": 0.19749377477712052,
+        "title": "13: TEN HEARTBEATS"
+      },
+      {
+        "progress": 0.20641482171475092,
+        "title": "14: PAYDAY"
+      },
+      {
+        "progress": 0.2159871791580638,
+        "title": "15: THE DECOY"
+      },
+      {
+        "progress": 0.2394028186782357,
+        "title": "16: COCOONS"
+      },
+      {
+        "progress": 0.2529468499822137,
+        "title": "17: A BLOODY, RED SUNSET"
+      },
+      {
+        "progress": 0.2698002427745241,
+        "title": "18: HIGHPRINCE OF WAR"
+      },
+      {
+        "progress": 0.29129862366648207,
+        "title": "19: STARFALLS"
+      },
+      {
+        "progress": 0.30551156846278255,
+        "title": "20: SCARLET"
+      },
+      {
+        "progress": 0.30811974431661904,
+        "title": "21: WHY MEN LIE"
+      },
+      {
+        "progress": 0.3199056773299203,
+        "title": "22: EYES, HANDS, OR SPHERES?"
+      },
+      {
+        "progress": 0.3335333228204385,
+        "title": "23: MANY USES"
+      },
+      {
+        "progress": 0.3481687392961006,
+        "title": "24: THE GALLERY OF MAPS"
+      },
+      {
+        "progress": 0.3575503977174794,
+        "title": "25: THE BUTCHER"
+      },
+      {
+        "progress": 0.36574312108287704,
+        "title": "26: STILLNESS"
+      },
+      {
+        "progress": 0.3817471697698043,
+        "title": "27: CHASM DUTY"
+      },
+      {
+        "progress": 0.40397387423399506,
+        "title": "28: DECISION"
+      },
+      {
+        "progress": 0.4278200534690719,
+        "title": "Interludes"
+      },
+      {
+        "progress": 0.4282887329883637,
+        "title": "1-4: RYSN"
+      },
+      {
+        "progress": 0.4347064885342213,
+        "title": "1-5: AXIES THE COLLECTOR"
+      },
+      {
+        "progress": 0.43999545256178463,
+        "title": "1-6: A WORK OF ART"
+      },
+      {
+        "progress": 0.44783464927882766,
+        "title": "Part Three: Dying"
+      },
+      {
+        "progress": 0.4488292180239914,
+        "title": "29: ERRORGANCE"
+      },
+      {
+        "progress": 0.46603760438020986,
+        "title": "30: DARKNESS UNSEEN"
+      },
+      {
+        "progress": 0.4760764409694845,
+        "title": "31: BENEATH THE SKIN"
+      },
+      {
+        "progress": 0.4810082110598098,
+        "title": "32: SIDE CARRY"
+      },
+      {
+        "progress": 0.4935121992364704,
+        "title": "33: CYMATICS"
+      },
+      {
+        "progress": 0.5081256119788324,
+        "title": "34: STORMWALL"
+      },
+      {
+        "progress": 0.5136602843615801,
+        "title": "35: A LIGHT BY WHICH TO SEE"
+      },
+      {
+        "progress": 0.5186294607985155,
+        "title": "36: THE LESSON"
+      },
+      {
+        "progress": 0.5330653767589234,
+        "title": "37: SIDES"
+      },
+      {
+        "progress": 0.5480689890384736,
+        "title": "38: ENVISAGER"
+      },
+      {
+        "progress": 0.5530799725686791,
+        "title": "39: BURNED INTO HER"
+      },
+      {
+        "progress": 0.5617597118977853,
+        "title": "40: EYES OF RED AND BLUE"
+      },
+      {
+        "progress": 0.5751761215486227,
+        "title": "41: OF ALDS AND MILP"
+      },
+      {
+        "progress": 0.5810870577708018,
+        "title": "42: BEGGARS AND BARMAIDS"
+      },
+      {
+        "progress": 0.5953660137670025,
+        "title": "43: THE WRETCH"
+      },
+      {
+        "progress": 0.6079682852857368,
+        "title": "44: THE WEEPING"
+      },
+      {
+        "progress": 0.6196273301036742,
+        "title": "45: SHADESMAR"
+      },
+      {
+        "progress": 0.6396367917089933,
+        "title": "46: CHILD OF TANAVAST"
+      },
+      {
+        "progress": 0.6577480645882918,
+        "title": "47: STORMBLESSINGS"
+      },
+      {
+        "progress": 0.6700936258851918,
+        "title": "48: STRAWBERRY"
+      },
+      {
+        "progress": 0.6798669507593121,
+        "title": "49: TO CARE"
+      },
+      {
+        "progress": 0.6885789622305918,
+        "title": "50: BACKBREAKER POWDER"
+      },
+      {
+        "progress": 0.6922660544739091,
+        "title": "51: SAS NAHN"
+      },
+      {
+        "progress": 0.6973195785551616,
+        "title": "Interludes"
+      },
+      {
+        "progress": 0.6977882580744533,
+        "title": "1-7: BAXIL"
+      },
+      {
+        "progress": 0.7010286745317789,
+        "title": "1-8: GERANID"
+      },
+      {
+        "progress": 0.7050634257612375,
+        "title": "1-9: DEATH WEARS WHITE"
+      },
+      {
+        "progress": 0.7114716463559984,
+        "title": "Part Four: Storm’s Illumination"
+      },
+      {
+        "progress": 0.7119403258752902,
+        "title": "52: A HIGHWAY TO THE SUN"
+      },
+      {
+        "progress": 0.7292154568891855,
+        "title": "53: DUNNY"
+      },
+      {
+        "progress": 0.7357938396881337,
+        "title": "54: GIBLETISH"
+      },
+      {
+        "progress": 0.7499283045023306,
+        "title": "55: AN EMERALD BROAM"
+      },
+      {
+        "progress": 0.7643422167294385,
+        "title": "56: THAT STORMING BOOK"
+      },
+      {
+        "progress": 0.7758002941165685,
+        "title": "57: WANDERSAIL"
+      },
+      {
+        "progress": 0.7983680564469104,
+        "title": "58: THE JOURNEY"
+      },
+      {
+        "progress": 0.8163392388908651,
+        "title": "59: AN HONOR"
+      },
+      {
+        "progress": 0.8326344703151302,
+        "title": "60: THAT WHICH WE CANNOT HAVE"
+      },
+      {
+        "progress": 0.8437162838628287,
+        "title": "61: RIGHT FOR WRONG"
+      },
+      {
+        "progress": 0.8520542318680069,
+        "title": "62: THREE GLYPHS"
+      },
+      {
+        "progress": 0.8645274148180475,
+        "title": "63: FEAR"
+      },
+      {
+        "progress": 0.8709730417594185,
+        "title": "64: A MAN OF EXTREMES"
+      },
+      {
+        "progress": 0.8794268760933105,
+        "title": "65: THE TOWER"
+      },
+      {
+        "progress": 0.8893021515983879,
+        "title": "66: CODES"
+      },
+      {
+        "progress": 0.8955644140955915,
+        "title": "67: WORDS"
+      },
+      {
+        "progress": 0.9157337694962244,
+        "title": "68: ESHONAI"
+      },
+      {
+        "progress": 0.9334871149805084,
+        "title": "69: JUSTICE"
+      },
+      {
+        "progress": 0.95244333121853,
+        "title": "Part Five: The Silence Above"
+      },
+      {
+        "progress": 0.9529120107378218,
+        "title": "70: SEA OF GLASS"
+      },
+      {
+        "progress": 0.958911695350978,
+        "title": "71: RECORDED IN BLOOD"
+      },
+      {
+        "progress": 0.9651592886926482,
+        "title": "72: VERISTITALIAN"
+      },
+      {
+        "progress": 0.9677278578265446,
+        "title": "73: TRUST"
+      },
+      {
+        "progress": 0.9771197846567968,
+        "title": "74: GHOSTBLOOD"
+      },
+      {
+        "progress": 0.9795629325108828,
+        "title": "75: IN THE TOP ROOM"
+      },
+      {
+        "progress": 0.984399353090241,
+        "title": "Epilogue: Of Most Worth"
+      },
+      {
+        "progress": 0.9884099002130696,
+        "title": "Endnote"
+      },
+      {
+        "progress": 0.989735991873288,
+        "title": "Ars Arcanum"
+      }
+    ],
+    "series": "The Stormlight Archive",
+    "cover": "data:image/jpeg;base64,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"
+  },
+  "updated": 1782298031,
+  "contexts": {
+    "shardplate": {
+      "title": "Shardplate",
+      "type": "object",
+      "points": [
+        {
+          "id": "wok-p069",
+          "text": "glowing ancient armour that grants enormous strength and seals against harm, paired with a Shardblade",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.31,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "sadeas": {
+      "title": "Highprince Sadeas",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p034",
+          "text": "Highprince and Elhokar's Highprince of Information, an old rival of Dalinar who runs the cruellest bridge crews",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p035",
+          "text": "feigns alliance with Dalinar, then withdraws his army at the Tower to let the Parshendi destroy him",
+          "progress": 0.92,
+          "chapter": "Part Five · The Silent Storm"
+        }
+      ],
+      "progress": 0.31,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "hesina": {
+      "title": "Hesina",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p051",
+          "text": "Kaladin's mother, quietly clever and unusually well read for a darkeyed woman of Hearthstone",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.3,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "elhokar": {
+      "title": "King Elhokar",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p025",
+          "text": "Gavilar's son and king of Alethkar, insecure and quick to suspect assassins everywhere",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p026",
+          "text": "his saddle girth is sabotaged during a hunt; he blames a plot, sowing distrust between the highprinces",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.31,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "wit": {
+      "title": "Wit (Hoid)",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p038",
+          "text": "the king's sharp-tongued jester who insults the powerful and speaks in riddles",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p039",
+          "text": "shows Kaladin unexpected kindness on a dark night, hinting he is far more than a fool",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.31,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "soulcaster": {
+      "title": "Soulcaster",
+      "type": "object",
+      "points": [
+        {
+          "id": "wok-p072",
+          "text": "a fabrial worn on the hand that transforms one substance into another, the prize Shallan means to steal",
+          "progress": 0.07,
+          "chapter": "Part One · Above Silence"
+        }
+      ],
+      "progress": 0.07,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "highstorm": {
+      "title": "The Highstorm",
+      "type": "concept",
+      "points": [
+        {
+          "id": "wok-p078",
+          "text": "the recurring tempest that sweeps Roshar, dangerous enough to kill yet the source of all Stormlight",
+          "progress": 0.05,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p079",
+          "text": "during it Dalinar falls into his visions, and many believe a presence rides within the storm",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.05,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "roshar": {
+      "title": "Roshar",
+      "type": "place",
+      "points": [
+        {
+          "id": "wok-p059",
+          "text": "a storm-scoured world where life clings to stone, plants pull in their tendrils and crustacean beasts roam",
+          "progress": 0,
+          "chapter": "Prelude · To the Edge of the World"
+        },
+        {
+          "id": "wok-p060",
+          "text": "shaped by the highstorms that sweep east to west, leaving Stormlight and ruin in their wake",
+          "progress": 0.05,
+          "chapter": "Part One · Above Silence"
+        }
+      ],
+      "progress": 0,
+      "chapter": "Prelude · To the Edge of the World",
+      "updated": 1718500000
+    },
+    "bridge-four": {
+      "title": "Bridge Four",
+      "type": "faction",
+      "points": [
+        {
+          "id": "wok-p092",
+          "text": "the deadliest, most cursed bridge crew in Sadeas's army, where men are sent to die",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p093",
+          "text": "Kaladin turns them into a true unit, training them in secret and saving the wounded others leave behind",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        },
+        {
+          "id": "wok-p094",
+          "text": "they buy their freedom with Dalinar and become his honoured guard under Kaladin",
+          "progress": 0.92,
+          "chapter": "Part Five · The Silent Storm"
+        }
+      ],
+      "progress": 0.3,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "desolations": {
+      "title": "The Desolations",
+      "type": "concept",
+      "points": [
+        {
+          "id": "wok-p087",
+          "text": "ancient cataclysms when the Voidbringers returned to scour humanity, held off by the Heralds and Radiants",
+          "progress": 0,
+          "chapter": "Prelude · To the Edge of the World"
+        },
+        {
+          "id": "wok-p088",
+          "text": "Jasnah and Dalinar fear, from her research and his visions, that another Desolation is coming",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0,
+      "chapter": "Prelude · To the Edge of the World",
+      "updated": 1718500000
+    },
+    "kaladin": {
+      "title": "Kaladin",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p001",
+          "text": "a darkeyed surgeon's son from Hearthstone who once dreamed of healing, then chose the spear",
+          "progress": 0.05,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p002",
+          "text": "sold into slavery and branded shash after defying a lighteyes; ends up a bridgeman in Sadeas's warcamp",
+          "progress": 0.05,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p003",
+          "text": "takes over Bridge Four and forges its broken men into a brotherhood that survives the chasms",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p004",
+          "text": "unknowingly draws in Stormlight to heal and fight, the first sign he is becoming a Windrunner",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        },
+        {
+          "id": "wok-p005",
+          "text": "saves Dalinar's army at the Tower and earns Bridge Four their freedom, becoming captain of the guard",
+          "progress": 0.92,
+          "chapter": "Part Five · The Silent Storm"
+        },
+        {
+          "id": "wok-p006",
+          "text": "speaks the First Ideal: Life before death, strength before weakness, journey before destination",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.05,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "shallan": {
+      "title": "Shallan",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p010",
+          "text": "a sheltered lighteyed girl of impoverished House Davar from Jah Keved, gifted at drawing",
+          "progress": 0.07,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p011",
+          "text": "becomes Jasnah Kholin's ward in Kharbranth, secretly meaning to steal her Soulcaster to save her family",
+          "progress": 0.07,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p012",
+          "text": "swaps Jasnah's Soulcaster for a fake, only to find the device dead in her hands",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p013",
+          "text": "can Soulcast without a fabrial and glimpses the strange symbol-headed Cryptics, hints of her own buried power",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.07,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "navani": {
+      "title": "Navani",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p027",
+          "text": "Gavilar's widow and Elhokar's mother, a brilliant artifabrian who toys with fabrial science",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        },
+        {
+          "id": "wok-p028",
+          "text": "draws close to Dalinar, helping him test whether his stormvisions are real or a sickness",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.75,
+      "chapter": "Part Four · Storm's Illumination",
+      "updated": 1718500000
+    },
+    "way-of-kings-book": {
+      "title": "The Way of Kings (in-world book)",
+      "type": "object",
+      "points": [
+        {
+          "id": "wok-p074",
+          "text": "an old, scorned book of royal philosophy by Nohadon that Dalinar has Navani's scholars read to him",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p075",
+          "text": "its parable of the Way of Kings shapes Dalinar's resolve to act with honour even when it looks weak",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.31,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "the-thrill": {
+      "title": "The Thrill",
+      "type": "concept",
+      "points": [
+        {
+          "id": "wok-p089",
+          "text": "the savage battle-joy Alethi warriors chase in combat; Dalinar grows uneasy as he feels it fade in him",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.31,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "spheres": {
+      "title": "Spheres",
+      "type": "object",
+      "points": [
+        {
+          "id": "wok-p070",
+          "text": "gems set in glass that hold Stormlight, serving as both money and light across Roshar",
+          "progress": 0.05,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p071",
+          "text": "recharged by being left out in a highstorm, slowly going dun as their light leaks away",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.05,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "szeth": {
+      "title": "Szeth",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p031",
+          "text": "Szeth-son-son-Vallano, Truthless of Shinovar, bound to obey whoever holds his Oathstone",
+          "progress": 0.01,
+          "chapter": "Prologue · To Kill"
+        },
+        {
+          "id": "wok-p032",
+          "text": "wields a stolen Honorblade, Surgebinding through Lashings to walk walls and fly, the Assassin in White",
+          "progress": 0.01,
+          "chapter": "Prologue · To Kill"
+        },
+        {
+          "id": "wok-p033",
+          "text": "kills on command and hates every death, passed from master to master across the kingdoms",
+          "progress": 0.5,
+          "chapter": "Interludes II"
+        }
+      ],
+      "progress": 0.01,
+      "chapter": "Prologue · To Kill",
+      "updated": 1718500000
+    },
+    "rock": {
+      "title": "Rock",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p042",
+          "text": "Numuhukumakiaki'aialunamor, a hulking Horneater cook of Bridge Four with a booming laugh",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        },
+        {
+          "id": "wok-p043",
+          "text": "can see spren others cannot, and quietly notices the windspren that follows Kaladin",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.55,
+      "chapter": "Part Three · Dying",
+      "updated": 1718500000
+    },
+    "adolin": {
+      "title": "Adolin",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p022",
+          "text": "Dalinar's elder son, a brash, dueling Shardbearer who loves courtship and fine clothes",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p023",
+          "text": "fiercely loyal to his father even as he fears Dalinar's visions are madness",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.31,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "tvlakv": {
+      "title": "Tvlakv",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p056",
+          "text": "the slaver who hauls Kaladin across the plains in a cage, ready to abandon his stock to a highstorm",
+          "progress": 0.05,
+          "chapter": "Part One · Above Silence"
+        }
+      ],
+      "progress": 0.05,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "dalinar": {
+      "title": "Dalinar",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p017",
+          "text": "the Blackthorn, Highprince of War and brother to the murdered King Gavilar",
+          "progress": 0.06,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p018",
+          "text": "during every highstorm he suffers visions of the ancient Desolations and the Knights Radiant",
+          "progress": 0.06,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p019",
+          "text": "tries to live the ideals of the in-world book The Way of Kings, earning whispers that he has gone soft or mad",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p020",
+          "text": "the visions command him to unite Alethkar; he wonders whether to trust them or stand down as Highprince",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        },
+        {
+          "id": "wok-p021",
+          "text": "betrayed by Sadeas at the Tower, he survives only because of Kaladin and his bridgemen",
+          "progress": 0.92,
+          "chapter": "Part Five · The Silent Storm"
+        }
+      ],
+      "progress": 0.06,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "moash": {
+      "title": "Moash",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p045",
+          "text": "a hard, capable bridgeman who becomes one of Kaladin's strongest spearmen and lieutenants",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.75,
+      "chapter": "Part Four · Storm's Illumination",
+      "updated": 1718500000
+    },
+    "knights-radiant": {
+      "title": "Knights Radiant",
+      "type": "concept",
+      "points": [
+        {
+          "id": "wok-p080",
+          "text": "the legendary orders of Surgebinders who once defended humanity, bound to spren and oaths",
+          "progress": 0,
+          "chapter": "Prelude · To the Edge of the World"
+        },
+        {
+          "id": "wok-p081",
+          "text": "they abandoned their oaths and vanished in the Recreance, leaving only their dead Shards behind",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p082",
+          "text": "Kaladin and Shallan show, unknowing, that the orders are beginning to return",
+          "progress": 0.92,
+          "chapter": "Part Five · The Silent Storm"
+        }
+      ],
+      "progress": 0,
+      "chapter": "Prelude · To the Edge of the World",
+      "updated": 1718500000
+    },
+    "helaran": {
+      "title": "Helaran",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p055",
+          "text": "Shallan's eldest brother, who vanished from House Davar carrying secret allegiances",
+          "progress": 0.5,
+          "chapter": "Interludes II"
+        }
+      ],
+      "progress": 0.5,
+      "chapter": "Interludes II",
+      "updated": 1718500000
+    },
+    "spren": {
+      "title": "Spren",
+      "type": "concept",
+      "points": [
+        {
+          "id": "wok-p085",
+          "text": "tiny spirits that gather around emotions, ideas and forces: rotspren on wounds, painspren, windspren and more",
+          "progress": 0.05,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p086",
+          "text": "the rarer, intelligent kinds like honorspren and Cryptics can bond a person and grant Radiant powers",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.05,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "ghostbloods": {
+      "title": "The Ghostbloods",
+      "type": "faction",
+      "points": [
+        {
+          "id": "wok-p099",
+          "text": "a shadowy secret society pursuing hidden ends, tied to Shallan's brother Helaran",
+          "progress": 0.5,
+          "chapter": "Interludes II"
+        }
+      ],
+      "progress": 0.5,
+      "chapter": "Interludes II",
+      "updated": 1718500000
+    },
+    "kharbranth": {
+      "title": "Kharbranth",
+      "type": "place",
+      "points": [
+        {
+          "id": "wok-p064",
+          "text": "the city of bells ruled by Taravangian, home to the Palanaeum, the greatest library in the world",
+          "progress": 0.07,
+          "chapter": "Part One · Above Silence"
+        }
+      ],
+      "progress": 0.07,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "the-highprinces": {
+      "title": "The Highprinces",
+      "type": "faction",
+      "points": [
+        {
+          "id": "wok-p097",
+          "text": "the ten near-independent lords of Alethkar, each running his own war camp and chasing his own glory",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p098",
+          "text": "their rivalry and refusal to cooperate is exactly what Dalinar's visions command him to end",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.31,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "honorblade": {
+      "title": "Honorblade",
+      "type": "object",
+      "points": [
+        {
+          "id": "wok-p073",
+          "text": "the Blade of one of the Heralds, which grants Szeth his Surgebinding powers when held",
+          "progress": 0.01,
+          "chapter": "Prologue · To Kill"
+        }
+      ],
+      "progress": 0.01,
+      "chapter": "Prologue · To Kill",
+      "updated": 1718500000
+    },
+    "laral": {
+      "title": "Laral",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p053",
+          "text": "a girl of Hearthstone Kaladin once expected to marry, later promised to Roshone's household instead",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.55,
+      "chapter": "Part Three · Dying",
+      "updated": 1718500000
+    },
+    "tien": {
+      "title": "Tien",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p047",
+          "text": "Kaladin's gentle younger brother, who could always make him smile with a carved wooden figure",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p048",
+          "text": "conscripted into the army and killed in his first battle; Kaladin enlisted to protect him and failed",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.3,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "roshone": {
+      "title": "Brightlord Roshone",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p052",
+          "text": "the spiteful citylord sent to Hearthstone, whose feud with Lirin helped drive Kaladin and Tien to the army",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.55,
+      "chapter": "Part Three · Dying",
+      "updated": 1718500000
+    },
+    "sigzil": {
+      "title": "Sigzil",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p044",
+          "text": "a worldly Azish bridgeman, once apprenticed to a Worldsinger, who keeps facts and tallies for Kaladin",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.75,
+      "chapter": "Part Four · Storm's Illumination",
+      "updated": 1718500000
+    },
+    "lirin": {
+      "title": "Lirin",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p049",
+          "text": "Kaladin's father, the surgeon of Hearthstone, who wanted his son to heal rather than kill",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p050",
+          "text": "clashes with Brightlord Roshone over a hoard of spheres meant for Kaladin's surgeon training",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.3,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "honor-chasm": {
+      "title": "The Honor Chasm",
+      "type": "place",
+      "points": [
+        {
+          "id": "wok-p066",
+          "text": "the cliff where broken bridgemen leap to their deaths; Kaladin goes to it but chooses to live instead",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.3,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "gavilar": {
+      "title": "Gavilar",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p029",
+          "text": "the king who united Alethkar, murdered by Szeth on the night a treaty was signed with the Parshendi",
+          "progress": 0.01,
+          "chapter": "Prologue · To Kill"
+        },
+        {
+          "id": "wok-p030",
+          "text": "dying, he gives Szeth a strange sphere and the words 'You must find the most important words a man can say'",
+          "progress": 0.01,
+          "chapter": "Prologue · To Kill"
+        }
+      ],
+      "progress": 0.01,
+      "chapter": "Prologue · To Kill",
+      "updated": 1718500000
+    },
+    "vengeance-pact": {
+      "title": "The Vengeance Pact",
+      "type": "concept",
+      "points": [
+        {
+          "id": "wok-p091",
+          "text": "the Alethi oath to punish the Parshendi for Gavilar's assassination, the reason for the long war",
+          "progress": 0.06,
+          "chapter": "Part One · Above Silence"
+        }
+      ],
+      "progress": 0.06,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "taravangian": {
+      "title": "King Taravangian",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p057",
+          "text": "the kindly, slow-witted king of Kharbranth who builds hospitals for the poor",
+          "progress": 0.07,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p058",
+          "text": "secretly commands Szeth through his Oathstone, a far colder schemer than his gentle face suggests",
+          "progress": 0.85,
+          "chapter": "Interludes IV"
+        }
+      ],
+      "progress": 0.07,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "renarin": {
+      "title": "Renarin",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p024",
+          "text": "Dalinar's younger son, kept from battle by a blood weakness and a quiet, watchful mind",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.31,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "surgebinding": {
+      "title": "Surgebinding",
+      "type": "concept",
+      "points": [
+        {
+          "id": "wok-p083",
+          "text": "the magic of binding the fundamental Surges of nature, powered by Stormlight and a spren bond",
+          "progress": 0.01,
+          "chapter": "Prologue · To Kill"
+        },
+        {
+          "id": "wok-p084",
+          "text": "Lashings let a Surgebinder change the pull of gravity, sticking things together or sending them flying",
+          "progress": 0.01,
+          "chapter": "Prologue · To Kill"
+        }
+      ],
+      "progress": 0.01,
+      "chapter": "Prologue · To Kill",
+      "updated": 1718500000
+    },
+    "jasnah": {
+      "title": "Jasnah",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p014",
+          "text": "Elhokar's sister and the king's scholar, a famous heretic who denies the Almighty",
+          "progress": 0.07,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p015",
+          "text": "researches the Voidbringers and the lost Knights Radiant, certain a Desolation is returning",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p016",
+          "text": "Soulcasts four would-be muggers to crystal and smoke in a back alley, revealing terrifying power",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.07,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "alethkar": {
+      "title": "Alethkar",
+      "type": "place",
+      "points": [
+        {
+          "id": "wok-p063",
+          "text": "the proud warrior kingdom Gavilar united, now ruled by Elhokar from the distant capital Kholinar",
+          "progress": 0.06,
+          "chapter": "Part One · Above Silence"
+        }
+      ],
+      "progress": 0.06,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "stormlight": {
+      "title": "Stormlight",
+      "type": "concept",
+      "points": [
+        {
+          "id": "wok-p076",
+          "text": "the radiant energy carried by highstorms and stored in gems, fuel for fabrials and Surgebinding alike",
+          "progress": 0.05,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p077",
+          "text": "Kaladin can draw it into himself to heal and move impossibly fast, glowing with held light",
+          "progress": 0.92,
+          "chapter": "Part Five · The Silent Storm"
+        }
+      ],
+      "progress": 0.05,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "shardblade": {
+      "title": "Shardblade",
+      "type": "object",
+      "points": [
+        {
+          "id": "wok-p067",
+          "text": "an ancient sword that can be summoned in ten heartbeats and cuts anything, killing the soul of the living",
+          "progress": 0.06,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p068",
+          "text": "relics of the lost Knights Radiant, now prized spoils that make their bearers nearly unstoppable",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.06,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "the-almighty": {
+      "title": "The Almighty",
+      "type": "concept",
+      "points": [
+        {
+          "id": "wok-p090",
+          "text": "the god of Vorinism, whom Jasnah openly denies as a heretic while Dalinar clings to faith",
+          "progress": 0.07,
+          "chapter": "Part One · Above Silence"
+        }
+      ],
+      "progress": 0.07,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "parshendi": {
+      "title": "The Parshendi",
+      "type": "faction",
+      "points": [
+        {
+          "id": "wok-p095",
+          "text": "a marbled-skin people of the Shattered Plains who sing in battle and claimed responsibility for killing Gavilar",
+          "progress": 0.06,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p096",
+          "text": "they grow forms and bond with their own kind of spren, deeper and stranger than the Alethi suspect",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.06,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "shattered-plains": {
+      "title": "The Shattered Plains",
+      "type": "place",
+      "points": [
+        {
+          "id": "wok-p061",
+          "text": "a vast maze of plateaus split by deep chasms, where the Alethi war camps besiege the Parshendi",
+          "progress": 0.06,
+          "chapter": "Part One · Above Silence"
+        },
+        {
+          "id": "wok-p062",
+          "text": "armies race across on bridges to contest gemhearts in giant chrysalises after highstorms",
+          "progress": 0.31,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.06,
+      "chapter": "Part One · Above Silence",
+      "updated": 1718500000
+    },
+    "amaram": {
+      "title": "Brightlord Amaram",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p036",
+          "text": "the lighteyed lord Kaladin once admired and served as a spearman",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        },
+        {
+          "id": "wok-p037",
+          "text": "murders Kaladin's squad and brands him a slave to steal the Shardblade Kaladin won, the wound behind Kaladin's hatred",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        }
+      ],
+      "progress": 0.55,
+      "chapter": "Part Three · Dying",
+      "updated": 1718500000
+    },
+    "hearthstone": {
+      "title": "Hearthstone",
+      "type": "place",
+      "points": [
+        {
+          "id": "wok-p065",
+          "text": "the small Alethi town where Kaladin grew up as the surgeon's son",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.3,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "syl": {
+      "title": "Syl (Sylphrena)",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p007",
+          "text": "an honorspren who attaches herself to Kaladin, at first a flitting windspren he barely notices",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        },
+        {
+          "id": "wok-p008",
+          "text": "grows in mind and memory as Kaladin keeps his oaths, becoming his companion and conscience",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        },
+        {
+          "id": "wok-p009",
+          "text": "can become a weapon for him, the bond that makes him a Knight Radiant reborn",
+          "progress": 0.92,
+          "chapter": "Part Five · The Silent Storm"
+        }
+      ],
+      "progress": 0.3,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "gaz": {
+      "title": "Gaz",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p054",
+          "text": "the nervous, one-eyed sergeant over the bridge crews who first torments and then fears Kaladin",
+          "progress": 0.3,
+          "chapter": "Part Two · The Broken One"
+        }
+      ],
+      "progress": 0.3,
+      "chapter": "Part Two · The Broken One",
+      "updated": 1718500000
+    },
+    "teft": {
+      "title": "Teft",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p040",
+          "text": "a grizzled older bridgeman who becomes Kaladin's first true follower and trains the others in the spear",
+          "progress": 0.55,
+          "chapter": "Part Three · Dying"
+        },
+        {
+          "id": "wok-p041",
+          "text": "raised among the Envisagers, he recognises the signs of the Radiants returning in Kaladin",
+          "progress": 0.92,
+          "chapter": "Part Five · The Silent Storm"
+        }
+      ],
+      "progress": 0.55,
+      "chapter": "Part Three · Dying",
+      "updated": 1718500000
+    },
+    "lopen": {
+      "title": "Lopen",
+      "type": "character",
+      "points": [
+        {
+          "id": "wok-p046",
+          "text": "a one-armed Herdazian bridgeman, irrepressibly cheerful and always cracking jokes",
+          "progress": 0.75,
+          "chapter": "Part Four · Storm's Illumination"
+        }
+      ],
+      "progress": 0.75,
+      "chapter": "Part Four · Storm's Illumination",
+      "updated": 1718500000
+    }
+  },
+  "relationships": [
+    {
+      "id": "wok-r001",
+      "from": "kaladin",
+      "to": "syl",
+      "label": "bonded to",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r002",
+      "from": "syl",
+      "to": "kaladin",
+      "label": "becomes a weapon for",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r003",
+      "from": "kaladin",
+      "to": "bridge-four",
+      "label": "leads",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r004",
+      "from": "kaladin",
+      "to": "lirin",
+      "label": "son of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r005",
+      "from": "kaladin",
+      "to": "hesina",
+      "label": "son of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r006",
+      "from": "kaladin",
+      "to": "tien",
+      "label": "brother of",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r007",
+      "from": "lirin",
+      "to": "hesina",
+      "label": "married to",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r008",
+      "from": "lirin",
+      "to": "tien",
+      "label": "father of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r009",
+      "from": "kaladin",
+      "to": "amaram",
+      "label": "betrayed and enslaved by",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r010",
+      "from": "amaram",
+      "to": "shardblade",
+      "label": "steals a",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r011",
+      "from": "tvlakv",
+      "to": "kaladin",
+      "label": "enslaves and transports",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r012",
+      "from": "kaladin",
+      "to": "sadeas",
+      "label": "bridgeman under",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r013",
+      "from": "gaz",
+      "to": "bridge-four",
+      "label": "sergeant over",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r014",
+      "from": "teft",
+      "to": "bridge-four",
+      "label": "member of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r015",
+      "from": "rock",
+      "to": "bridge-four",
+      "label": "member of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r016",
+      "from": "sigzil",
+      "to": "bridge-four",
+      "label": "member of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r017",
+      "from": "moash",
+      "to": "bridge-four",
+      "label": "member of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r018",
+      "from": "lopen",
+      "to": "bridge-four",
+      "label": "member of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r019",
+      "from": "teft",
+      "to": "kaladin",
+      "label": "first follower of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r020",
+      "from": "teft",
+      "to": "knights-radiant",
+      "label": "recognises the signs of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r021",
+      "from": "bridge-four",
+      "to": "shattered-plains",
+      "label": "runs bridges across",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r022",
+      "from": "kaladin",
+      "to": "honor-chasm",
+      "label": "chooses life at",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r023",
+      "from": "kaladin",
+      "to": "stormlight",
+      "label": "draws in",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r024",
+      "from": "kaladin",
+      "to": "surgebinding",
+      "label": "begins to wield",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r025",
+      "from": "kaladin",
+      "to": "knights-radiant",
+      "label": "reborn as one of the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r026",
+      "from": "kaladin",
+      "to": "hearthstone",
+      "label": "grew up in",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r027",
+      "from": "lirin",
+      "to": "roshone",
+      "label": "feuds with",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r028",
+      "from": "roshone",
+      "to": "hearthstone",
+      "label": "citylord of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r029",
+      "from": "laral",
+      "to": "kaladin",
+      "label": "once promised to",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r030",
+      "from": "laral",
+      "to": "roshone",
+      "label": "joins the household of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r031",
+      "from": "szeth",
+      "to": "gavilar",
+      "label": "assassinates",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r032",
+      "from": "szeth",
+      "to": "honorblade",
+      "label": "wields",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r033",
+      "from": "szeth",
+      "to": "surgebinding",
+      "label": "uses",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r034",
+      "from": "taravangian",
+      "to": "szeth",
+      "label": "secretly commands",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r035",
+      "from": "taravangian",
+      "to": "kharbranth",
+      "label": "rules",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r036",
+      "from": "gavilar",
+      "to": "szeth",
+      "label": "gives a strange sphere to",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r037",
+      "from": "gavilar",
+      "to": "alethkar",
+      "label": "united",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r038",
+      "from": "gavilar",
+      "to": "dalinar",
+      "label": "brother of",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r039",
+      "from": "elhokar",
+      "to": "gavilar",
+      "label": "son of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r040",
+      "from": "elhokar",
+      "to": "alethkar",
+      "label": "king of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r041",
+      "from": "navani",
+      "to": "gavilar",
+      "label": "widow of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r042",
+      "from": "navani",
+      "to": "elhokar",
+      "label": "mother of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r043",
+      "from": "jasnah",
+      "to": "gavilar",
+      "label": "daughter of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r044",
+      "from": "jasnah",
+      "to": "elhokar",
+      "label": "sister of",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r045",
+      "from": "navani",
+      "to": "jasnah",
+      "label": "mother of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r046",
+      "from": "dalinar",
+      "to": "elhokar",
+      "label": "uncle and protector of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r047",
+      "from": "dalinar",
+      "to": "adolin",
+      "label": "father of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r048",
+      "from": "dalinar",
+      "to": "renarin",
+      "label": "father of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r049",
+      "from": "adolin",
+      "to": "renarin",
+      "label": "brother of",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r050",
+      "from": "dalinar",
+      "to": "navani",
+      "label": "grows close to",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r051",
+      "from": "dalinar",
+      "to": "highstorm",
+      "label": "has visions during",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r052",
+      "from": "dalinar",
+      "to": "knights-radiant",
+      "label": "sees visions of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r053",
+      "from": "dalinar",
+      "to": "way-of-kings-book",
+      "label": "lives by",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r054",
+      "from": "dalinar",
+      "to": "the-thrill",
+      "label": "loses",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r055",
+      "from": "dalinar",
+      "to": "the-highprinces",
+      "label": "tries to unite",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r056",
+      "from": "dalinar",
+      "to": "sadeas",
+      "label": "rival of",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r057",
+      "from": "sadeas",
+      "to": "dalinar",
+      "label": "betrays at the Tower",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r058",
+      "from": "sadeas",
+      "to": "the-highprinces",
+      "label": "one of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r059",
+      "from": "dalinar",
+      "to": "the-highprinces",
+      "label": "one of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r060",
+      "from": "kaladin",
+      "to": "dalinar",
+      "label": "saves the army of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r061",
+      "from": "bridge-four",
+      "to": "dalinar",
+      "label": "becomes the guard of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r062",
+      "from": "adolin",
+      "to": "shardblade",
+      "label": "bears a",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r063",
+      "from": "adolin",
+      "to": "shardplate",
+      "label": "wears",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r064",
+      "from": "dalinar",
+      "to": "shardblade",
+      "label": "bears a",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r065",
+      "from": "shardblade",
+      "to": "shardplate",
+      "label": "paired with",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r066",
+      "from": "shardblade",
+      "to": "knights-radiant",
+      "label": "relic of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r067",
+      "from": "wit",
+      "to": "elhokar",
+      "label": "jester to",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r068",
+      "from": "wit",
+      "to": "kaladin",
+      "label": "shows kindness to",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r069",
+      "from": "shallan",
+      "to": "jasnah",
+      "label": "ward of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r070",
+      "from": "shallan",
+      "to": "soulcaster",
+      "label": "tries to steal",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r071",
+      "from": "jasnah",
+      "to": "soulcaster",
+      "label": "wields",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r072",
+      "from": "jasnah",
+      "to": "desolations",
+      "label": "researches the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r073",
+      "from": "jasnah",
+      "to": "knights-radiant",
+      "label": "researches the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r074",
+      "from": "jasnah",
+      "to": "the-almighty",
+      "label": "denies",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r075",
+      "from": "shallan",
+      "to": "spren",
+      "label": "glimpses the Cryptics among",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r076",
+      "from": "shallan",
+      "to": "surgebinding",
+      "label": "begins to wield",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r077",
+      "from": "shallan",
+      "to": "knights-radiant",
+      "label": "reborn as one of the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r078",
+      "from": "shallan",
+      "to": "helaran",
+      "label": "sister of",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r079",
+      "from": "helaran",
+      "to": "ghostbloods",
+      "label": "tied to",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r080",
+      "from": "shallan",
+      "to": "kharbranth",
+      "label": "studies in",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r081",
+      "from": "jasnah",
+      "to": "kharbranth",
+      "label": "researches in",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r082",
+      "from": "soulcaster",
+      "to": "stormlight",
+      "label": "powered by",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r083",
+      "from": "spheres",
+      "to": "stormlight",
+      "label": "hold",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r084",
+      "from": "highstorm",
+      "to": "stormlight",
+      "label": "carries",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r085",
+      "from": "highstorm",
+      "to": "spheres",
+      "label": "recharges",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r086",
+      "from": "surgebinding",
+      "to": "stormlight",
+      "label": "fueled by",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r087",
+      "from": "surgebinding",
+      "to": "spren",
+      "label": "requires a bond with",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r088",
+      "from": "syl",
+      "to": "spren",
+      "label": "is an honorspren among",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r089",
+      "from": "honorblade",
+      "to": "surgebinding",
+      "label": "grants",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r090",
+      "from": "knights-radiant",
+      "to": "surgebinding",
+      "label": "wielded",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r091",
+      "from": "knights-radiant",
+      "to": "desolations",
+      "label": "defended humanity in the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r092",
+      "from": "desolations",
+      "to": "knights-radiant",
+      "label": "abandoned in the Recreance by the",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r093",
+      "from": "dalinar",
+      "to": "desolations",
+      "label": "fears the return of the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r094",
+      "from": "parshendi",
+      "to": "gavilar",
+      "label": "claim to have killed",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r095",
+      "from": "parshendi",
+      "to": "shattered-plains",
+      "label": "dwell on the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r096",
+      "from": "the-highprinces",
+      "to": "parshendi",
+      "label": "war against the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r097",
+      "from": "vengeance-pact",
+      "to": "parshendi",
+      "label": "sworn against the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r098",
+      "from": "vengeance-pact",
+      "to": "gavilar",
+      "label": "sworn to avenge",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r099",
+      "from": "alethkar",
+      "to": "shattered-plains",
+      "label": "wages war from the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r100",
+      "from": "parshendi",
+      "to": "spren",
+      "label": "bond their own kind of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r101",
+      "from": "shattered-plains",
+      "to": "roshar",
+      "label": "lies within",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r102",
+      "from": "alethkar",
+      "to": "roshar",
+      "label": "a kingdom of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r103",
+      "from": "kharbranth",
+      "to": "roshar",
+      "label": "a city of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r104",
+      "from": "hearthstone",
+      "to": "alethkar",
+      "label": "a town of",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r105",
+      "from": "highstorm",
+      "to": "roshar",
+      "label": "shapes",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r106",
+      "from": "the-almighty",
+      "to": "desolations",
+      "label": "believed to hold back the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r107",
+      "from": "way-of-kings-book",
+      "to": "knights-radiant",
+      "label": "echoes the age of the",
+      "directed": false,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r108",
+      "from": "rock",
+      "to": "spren",
+      "label": "can see hidden",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    },
+    {
+      "id": "wok-r109",
+      "from": "elhokar",
+      "to": "the-highprinces",
+      "label": "fails to control the",
+      "directed": true,
+      "points": [],
+      "updated": 1718500000
+    }
+  ],
+  "layout": {
+    "kaladin": {
+      "x": 552,
+      "y": 232
+    },
+    "syl": {
+      "x": 531,
+      "y": -192
+    },
+    "shallan": {
+      "x": 1578,
+      "y": 268
+    },
+    "jasnah": {
+      "x": 1477,
+      "y": 509
+    },
+    "dalinar": {
+      "x": 893,
+      "y": 706
+    },
+    "adolin": {
+      "x": 809,
+      "y": 1098
+    },
+    "renarin": {
+      "x": 1038,
+      "y": 1115
+    },
+    "elhokar": {
+      "x": 1235,
+      "y": 610
+    },
+    "navani": {
+      "x": 250,
+      "y": 78
+    },
+    "gavilar": {
+      "x": 1247,
+      "y": 463
+    },
+    "szeth": {
+      "x": 1260,
+      "y": 108
+    },
+    "sadeas": {
+      "x": 544,
+      "y": 633
+    },
+    "amaram": {
+      "x": 432,
+      "y": 930
+    },
+    "wit": {
+      "x": 715,
+      "y": 484
+    },
+    "teft": {
+      "x": 421,
+      "y": 137
+    },
+    "rock": {
+      "x": 714,
+      "y": -428
+    },
+    "sigzil": {
+      "x": 595,
+      "y": 243
+    },
+    "moash": {
+      "x": 577,
+      "y": 107
+    },
+    "lopen": {
+      "x": 511,
+      "y": 71
+    },
+    "tien": {
+      "x": 264,
+      "y": 465
+    },
+    "lirin": {
+      "x": 291,
+      "y": 254
+    },
+    "hesina": {
+      "x": 342,
+      "y": 19
+    },
+    "roshone": {
+      "x": 72,
+      "y": 323
+    },
+    "laral": {
+      "x": 98,
+      "y": -72
+    },
+    "gaz": {
+      "x": 377,
+      "y": -462
+    },
+    "helaran": {
+      "x": 1994,
+      "y": 244
+    },
+    "tvlakv": {
+      "x": -36,
+      "y": 631
+    },
+    "taravangian": {
+      "x": 1682,
+      "y": -179
+    },
+    "roshar": {
+      "x": 1286,
+      "y": -17
+    },
+    "shattered-plains": {
+      "x": 1118,
+      "y": -164
+    },
+    "alethkar": {
+      "x": 1021,
+      "y": 342
+    },
+    "kharbranth": {
+      "x": 1617,
+      "y": 45
+    },
+    "hearthstone": {
+      "x": 538,
+      "y": 382
+    },
+    "honor-chasm": {
+      "x": -13,
+      "y": 112
+    },
+    "shardblade": {
+      "x": 885,
+      "y": 921
+    },
+    "shardplate": {
+      "x": 764,
+      "y": 1305
+    },
+    "spheres": {
+      "x": 834,
+      "y": -128
+    },
+    "soulcaster": {
+      "x": 1322,
+      "y": 316
+    },
+    "honorblade": {
+      "x": 1296,
+      "y": -153
+    },
+    "way-of-kings-book": {
+      "x": 669,
+      "y": 870
+    },
+    "stormlight": {
+      "x": 856,
+      "y": 125
+    },
+    "highstorm": {
+      "x": 1015,
+      "y": 25
+    },
+    "knights-radiant": {
+      "x": 1062,
+      "y": 540
+    },
+    "surgebinding": {
+      "x": 1084,
+      "y": 190
+    },
+    "spren": {
+      "x": 1054,
+      "y": -329
+    },
+    "desolations": {
+      "x": 1404,
+      "y": 878
+    },
+    "the-thrill": {
+      "x": 1085,
+      "y": 908
+    },
+    "the-almighty": {
+      "x": 1674,
+      "y": 728
+    },
+    "vengeance-pact": {
+      "x": 1711,
+      "y": 520
+    },
+    "bridge-four": {
+      "x": 629,
+      "y": -20
+    },
+    "parshendi": {
+      "x": 1406,
+      "y": 159
+    },
+    "the-highprinces": {
+      "x": 880,
+      "y": 544
+    },
+    "ghostbloods": {
+      "x": 2283,
+      "y": 222
+    }
+  },
+  "reading_progress": 0,
+  "tombstones": {
+    "contexts": {},
+    "relationships": {},
+    "points": {}
+  },
+  "source": "device",
+  "profile": {
+    "id": "p-907d1cc14724",
+    "name": "The Way of Kings"
+  }
+}

@@ -8,6 +8,7 @@ import {
 } from "../lib/homePrefs";
 import { btn, btnAccent, input } from "../lib/ui";
 import CoverPicker from "./CoverPicker";
+import Modal from "./Modal";
 import type { BookSummary, LibraryEntry } from "../lib/types";
 
 //the profile a card will open at: the remembered choice if it still exists, else the first profile
@@ -104,6 +105,8 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
   const [books, setBooks] = useState<BookSummary[] | null>(null);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [attachFor, setAttachFor] = useState<string | null>(null); //external book_id being attached
+  const [attachTarget, setAttachTarget] = useState<BookSummary | null>(null); //chosen book; opens the name modal
+  const [attachName, setAttachName] = useState("");                //draft profile name in the attach modal
   const [error, setError] = useState("");
   const selecting = !!coverSel;                            //cover selection mode active
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -281,6 +284,23 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
     : [];
   const deviceBooks: DeviceCard[] = [...startedBooks, ...libraryCards];
 
+  //attach pick-mode: while an imported doc is being attached, tapping one of your books (instead of a
+  //dropdown) chooses the target. only STARTED books are valid — an unstarted library card has no Book row
+  //on the server yet, which is exactly the "book not found" the old dropdown could hit.
+  const attaching = !!attachFor;
+  const attachBook = attaching ? externalBooks.find((b) => b.book_id === attachFor) ?? null : null;
+  function pickAttachTarget(target: DeviceCard) {
+    if (!attachFor || !target.started) return;
+    setAttachName(attachBook?.title || "Imported"); //sensible default the styled modal lets them edit
+    setAttachTarget(target);
+  }
+  function confirmAttach() {
+    const nm = attachName.trim();
+    if (!attachFor || !attachTarget || !nm) return;
+    void attach(attachFor, attachTarget.book_id, attachBook ? chosenProfile(attachBook, picked[attachBook.book_id]) : "default", nm);
+    setAttachTarget(null); //attach() clears attachFor + reloads on success
+  }
+
   //within a series, sort by series position (then title) so editing an index reorders the books; a
   //started/unstarted split only breaks ties
   const cardOrder = (a: DeviceCard, b: DeviceCard) => byOrder(a, b) || Number(b.started) - Number(a.started);
@@ -421,7 +441,7 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
   //a single book card. draggable (manual flat mode) and pinnable only when the book itself is the unit.
   //dragging is suspended while its series is being edited so the inputs work normally.
   const renderCard = (b: DeviceCard, draggable: boolean, pinnable: boolean) => {
-    const canDrag = draggable && editMeta !== b.book_id && !selecting;
+    const canDrag = draggable && editMeta !== b.book_id && !selecting && !attaching;
     const sel = selectedIds.has(b.book_id);
     return (
     <div key={b.book_id} ref={registerFlipBooks(b.book_id)}
@@ -432,7 +452,8 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
          onDrop={canDrag ? (e) => { e.preventDefault(); dropOn(e, bookIds, b.book_id); } : undefined}
          className={`group/card relative w-full rounded-xl border bg-paper-card p-3 shadow-card transition hover:shadow-pop ${
            selecting && sel ? "border-accent ring-2 ring-accent-ring" : "border-line hover:border-accent-ring"} ${
-           canDrag ? "cursor-move" : "cursor-pointer"} ${dragId === b.book_id ? "opacity-40 ring-2 ring-accent-ring" : ""} ${b.started ? "" : "opacity-65 hover:opacity-100"}`}>
+           canDrag ? "cursor-move" : "cursor-pointer"} ${dragId === b.book_id ? "opacity-40 ring-2 ring-accent-ring" : ""} ${
+           b.started ? "" : attaching ? "opacity-40" : "opacity-65 hover:opacity-100"}`}>
       {selecting && (
         <div className="absolute top-1 right-1 z-20">
           <span className={`grid place-items-center w-5 h-5 rounded-full border shrink-0 transition ${
@@ -441,10 +462,14 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
           </span>
         </div>
       )}
-      {pinnable && !selecting && <div className="absolute top-0 right-1 z-10">{pinToggle(b.book_id, prefs.pinBooks.includes(b.book_id))}</div>}
-      {!selecting && coverEditButton(b.book_id, b.title)}
-      <button className="group flex w-full items-start gap-2.5 text-left"
-              onClick={() => (selecting ? toggleSelected(b.book_id) : b.started ? open(b) : adopt(b.book_id))}>
+      {pinnable && !selecting && !attaching && <div className="absolute top-0 right-1 z-10">{pinToggle(b.book_id, prefs.pinBooks.includes(b.book_id))}</div>}
+      {!selecting && !attaching && coverEditButton(b.book_id, b.title)}
+      <button className="group flex w-full items-start gap-2.5 text-left" disabled={attaching && !b.started}
+              onClick={() => {
+                if (selecting) return toggleSelected(b.book_id);
+                if (attaching) return pickAttachTarget(b);
+                return b.started ? open(b) : adopt(b.book_id);
+              }}>
         <Cover src={b.cover} title={b.title} />
         <span className="min-w-0 flex-1">
           <strong className="block truncate group-hover:text-accent-hover transition">{b.title || b.book_id}</strong>
@@ -452,7 +477,7 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
         </span>
       </button>
       {showProgress && b.started && b.reading_progress != null && progressBar(b.reading_progress)}
-      {editMeta === b.book_id ? seriesEditor(b) : b.started ? (
+      {!attaching && (editMeta === b.book_id ? seriesEditor(b) : b.started ? (
         <>
           {(b.profiles?.length ?? 0) >= 1 && (
             <label className="mt-2 block">
@@ -468,7 +493,7 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
                   onClick={() => adopt(b.book_id)}>+ start contexts</button>
           <div className="mt-2 pt-2 border-t border-line">{seriesRow(b)}</div>
         </div>
-      )}
+      ))}
     </div>
     );
   };
@@ -525,6 +550,17 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
           <span className="flex-1" />
           <button className={btn} onClick={() => onCoverSelDone?.()}>Cancel</button>
           <button className={btnAccent} disabled={selectedIds.size === 0} onClick={confirmSelection}>Confirm</button>
+        </div>
+      )}
+
+      {attaching && (
+        //sticky banner while choosing where to attach an imported doc — tap a started book below to pick it
+        <div className="sticky top-0 z-30 -mx-4 mb-3 px-4 py-2.5 border-b border-line bg-paper/95 backdrop-blur flex items-center gap-3 flex-wrap">
+          <span className="text-sm">
+            Tap a book to attach <strong>{attachBook?.title || "imported contexts"}</strong> to · <span className="text-ink-soft">only books you've loaded can be picked</span>
+          </span>
+          <span className="flex-1" />
+          <button className={btn} onClick={() => setAttachFor(null)}>Cancel</button>
         </div>
       )}
 
@@ -644,25 +680,12 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
                 )}
                 <div className="mt-2 pt-2 border-t border-line">
                   {attachFor === b.book_id ? (
-                    <div className="flex gap-1.5 items-center">
-                      <select autoFocus className={`${input} flex-1 py-1 min-w-0`} defaultValue=""
-                              onChange={(e) => {
-                                const targetId = e.target.value;
-                                if (!targetId) return;
-                                const def = b.title || "Imported";
-                                const nm = window.prompt("Name the new profile this becomes on that book:", def);
-                                if (nm && nm.trim()) void attach(b.book_id, targetId, chosenProfile(b, picked[b.book_id]), nm.trim());
-                                else setAttachFor(null);
-                              }}>
-                        <option value="" disabled>attach to…</option>
-                        {deviceBooks.map((d) => <option key={d.book_id} value={d.book_id}>{d.title || d.book_id}</option>)}
-                      </select>
-                      <button className={`${btn} py-1`} onClick={() => setAttachFor(null)}>Cancel</button>
-                    </div>
+                    <p className="text-xs text-accent-hover">Pick one of your books above to attach this to…</p>
                   ) : (
                     <button className="text-xs text-ink-soft hover:text-accent-hover transition disabled:opacity-50"
-                            disabled={deviceBooks.length === 0} title={deviceBooks.length === 0 ? "no books to attach to yet" : undefined}
-                            onClick={() => setAttachFor(b.book_id)}>
+                            disabled={attaching || startedBooks.length === 0}
+                            title={startedBooks.length === 0 ? "start contexts on one of your books first" : undefined}
+                            onClick={() => { setError(""); setAttachFor(b.book_id); }}>
                       + Attach to one of your books
                     </button>
                   )}
@@ -676,6 +699,24 @@ export default function BookList({ onOpen, showUnstarted = true, showProgress = 
       {coverFor && (
         <CoverPicker bookId={coverFor.bookId} title={coverFor.title}
                      onClose={() => setCoverFor(null)} onChanged={() => void load()} />
+      )}
+
+      {attachTarget && (
+        <Modal title="Attach to book" onClose={() => setAttachTarget(null)} maxWidth="max-w-sm">
+          <p className="text-sm text-ink-soft mb-3">
+            Attaching <strong>“{attachBook?.title || "imported contexts"}”</strong> to <strong>“{attachTarget.title || attachTarget.book_id}”</strong> as a new profile.
+          </p>
+          <label className="block">
+            <span className="block text-[10px] uppercase tracking-wide text-ink-faint mb-1">Profile name</span>
+            <input autoFocus className={`${input} w-full`} value={attachName}
+                   onChange={(e) => setAttachName(e.target.value)}
+                   onKeyDown={(e) => { if (e.key === "Enter") confirmAttach(); }} />
+          </label>
+          <div className="flex justify-end gap-2 mt-4">
+            <button className={btn} onClick={() => setAttachTarget(null)}>Cancel</button>
+            <button className={btnAccent} disabled={!attachName.trim()} onClick={confirmAttach}>Attach</button>
+          </div>
+        </Modal>
       )}
     </div>
   );

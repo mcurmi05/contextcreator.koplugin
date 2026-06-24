@@ -92,7 +92,7 @@ export default function App() {
             : <Mark />}
           <strong className="tracking-tight truncate">{theme.title || "Context Creator"}</strong>
         </button>
-        <span className="text-ink-soft text-xs font-mono">v{__APP_VERSION__}</span>
+        <span className="text-ink-soft text-xs font-mono">{__APP_VERSION__}</span>
         <span className="flex-1" />
         {me && <span className="text-ink-soft text-sm hidden sm:inline">{me.username}</span>}
         <button className={btnGhost} onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings"><Gear /></button>
