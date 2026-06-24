@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
-import { btnAccent, input } from "./ui";
+import { api } from "../lib/api";
+import { btnAccent, input } from "../lib/ui";
 
 //first-run setup if no account exists yet, otherwise login. both hit the session endpoints.
 export default function Auth({ onAuthed, title, logo }: { onAuthed: () => void; title: string; logo: string | null }) {

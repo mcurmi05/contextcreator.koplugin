@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { pointText, pointProgress, typeLabel, colorFor, relArrow } from "./model";
+import { pointText, pointProgress, typeLabel, colorFor, relArrow } from "../lib/model";
 import PointItem from "./PointItem";
-import type { Doc, GraphEditOps, Point, Selected } from "./types";
+import type { Doc, GraphEditOps, Point, Selected } from "../lib/types";
 
 const pointRef = (p: Point, i: number) => ({ id: typeof p === "object" ? p.id : undefined, index: i });
 
@@ -53,6 +53,8 @@ export default function DetailPanel({ doc, selected, scrub, typeColors, ops, onA
               {(ctx.aliases || []).map((a, i) => (
                 <div key={i} className="flex items-center gap-1.5 group/al">
                   <span className="flex-1 min-w-0 truncate text-ink-faint">{a}</span>
+                  <button className="shrink-0 text-ink-faint hover:text-accent-hover transition opacity-60 group-hover/al:opacity-100"
+                          title="Make this the main name" aria-label="Make main name" onClick={() => ops.promoteAlias(selected.id, i)}>↑</button>
                   <button className="shrink-0 text-ink-faint hover:text-red-600 transition opacity-60 group-hover/al:opacity-100"
                           title="Remove alias" aria-label="Remove alias" onClick={() => ops.deleteAlias(selected.id, i)}>×</button>
                 </div>

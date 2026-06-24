@@ -5,9 +5,11 @@
 import { api } from "./api";
 
 export type HomeSort = "author" | "title" | "manual";
+export type AuthorSort = "last" | "first"; //sort authors by last name (default) or first name
 
 export interface HomePrefs {
   sort: HomeSort;
+  authorSort: AuthorSort;
   group: boolean;
   orderBooks: string[];
   orderSeries: string[];
@@ -16,7 +18,7 @@ export interface HomePrefs {
 }
 
 export const DEFAULT_PREFS: HomePrefs = {
-  sort: "author", group: true, orderBooks: [], orderSeries: [], pinBooks: [], pinSeries: [],
+  sort: "author", authorSort: "last", group: true, orderBooks: [], orderSeries: [], pinBooks: [], pinSeries: [],
 };
 
 //load the stored prefs, filling any missing fields with defaults (server returns {} until first save).

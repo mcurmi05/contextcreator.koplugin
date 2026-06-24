@@ -1,19 +1,22 @@
 #a user's synced books, plus the view/edit endpoints the web ui uses. each book holds one or more named
 #profiles (alternate context documents); endpoints that touch notes take a ?profile= query param (default
 #"default"). book-level metadata (title/series) and the shared reading position live on the Book itself.
+import io
 import json
+import secrets
 import time
+import zipfile
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from .. import docops, profiles
-from ..db import get_session
-from ..deps import get_current_user
+from ..services import covers, docops, profiles
+from ..core.db import get_session
+from ..core.deps import get_current_user
 from ..models import Book, LibraryEntry, Profile, User
-from ..profiles import DEFAULT_PID
-from ..sync import _normalize, new_doc
+from ..services.profiles import DEFAULT_PID
+from ..services.sync import _normalize, new_doc
 
 router = APIRouter(prefix="/api", tags=["books"])
 
@@ -49,6 +52,23 @@ class BookMeta(BaseModel):
     series_index: int | None = None  #0-based position (the home page shows it +1)
 
 
+class CoverChoiceIn(BaseModel):
+    source: str = ""  #which cover source to show (a device id / "custom"); "" = automatic (freshest)
+
+
+class CustomCoverIn(BaseModel):
+    cover: str  #a data: url for the uploaded cover
+
+
+class SetAllCoversIn(BaseModel):
+    source: str  #a device source to apply to every book that has a cover from it
+
+
+class SetManyCoversIn(BaseModel):
+    source: str            #a device source
+    book_ids: list[str]    #the chosen books to apply it to
+
+
 def _get_row(session, user, book_id) -> Book:
     row = session.exec(
         select(Book).where(Book.user_id == user.id, Book.book_id == book_id)
@@ -74,6 +94,7 @@ def list_books(user: User = Depends(get_current_user), session: Session = Depend
         out.append({
             "book_id": b.book_id, "title": b.title, "authors": b.authors, "cover": b.cover,
             "series": b.series, "series_index": b.series_index, "source": b.source, "updated": b.updated,
+            "reading_progress": b.reading_progress,  #0..1 device reading position, for the home progress bar
             "profiles": [{"profile_id": p.profile_id, "name": p.name, "updated": p.updated} for p in profs],
         })
     return out
@@ -121,6 +142,9 @@ def rename_profile(book_id: str, profile_id: str, body: ProfileRename, user: Use
 def delete_profile(book_id: str, profile_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     rows = profiles.list_profiles(session, user.id, book_id)
     prof = _get_profile(session, user, book_id, profile_id)
+    #tombstone it so the device can't resurrect it on its next push (additive sync would otherwise re-add
+    #the notes it still holds). the version is its current content so a genuinely newer edit can override.
+    profiles.tombstone_profile(session, user.id, book_id, profile_id, prof.updated)
     session.delete(prof)
     #if that was the last profile, drop the Book itself. for a device book its library catalog entry
     #resurfaces so it shows "start contexts" again; an imported book is simply removed.
@@ -166,12 +190,93 @@ def list_book_devices(book_id: str, user: User = Depends(get_current_user), sess
              "chapter_frac": r.chapter_frac, "updated": r.updated} for r in rows]
 
 
+@router.get("/covers")
+def covers_overview(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #account-wide cover picture for the settings panel: device sources + each book's options & current
+    return covers.overview(session, user.id)
+
+
+@router.post("/covers/set-all")
+def set_all_covers(body: SetAllCoversIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #point every book that has a cover from this device at it (one bulk action from settings)
+    n = covers.set_all_to_source(session, user.id, body.source)
+    session.commit()
+    return {"updated": n}
+
+
+@router.post("/covers/set-many")
+def set_many_covers(body: SetManyCoversIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #point the chosen books at this device's cover (used by the home-page selection mode + Confirm)
+    n = covers.set_many_to_source(session, user.id, body.source, body.book_ids or [])
+    session.commit()
+    return {"updated": n}
+
+
+#the book must be something the user actually has (a started Book or a device library entry) before we'll
+#read/change its covers. covers + the choice are user+book scoped, independent of profiles.
+def _cover_book(session, user, book_id):
+    if session.exec(select(Book).where(Book.user_id == user.id, Book.book_id == book_id)).first():
+        return
+    if session.exec(select(LibraryEntry).where(LibraryEntry.user_id == user.id, LibraryEntry.book_id == book_id)).first():
+        return
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="book not found")
+
+
+@router.get("/books/{book_id}/covers")
+def list_covers(book_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #the cover options for this book (one per device that synced + any custom upload) and which is shown
+    _cover_book(session, user, book_id)
+    return covers.list_for_book(session, user.id, book_id)
+
+
+@router.put("/books/{book_id}/cover")
+def choose_cover(book_id: str, body: CoverChoiceIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #pick which source's cover to show
+    _cover_book(session, user, book_id)
+    covers.set_choice(session, user.id, book_id, body.source)
+    cover = covers.resolve(session, user.id, book_id)
+    session.commit()
+    return {"cover": cover}
+
+
+@router.post("/books/{book_id}/cover/custom")
+def upload_cover(book_id: str, body: CustomCoverIn, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #add a custom cover (a data: url, downscaled client-side) under its own source, and switch to it. each
+    #upload is a separate source, so a book can hold as many custom covers as the user wants.
+    _cover_book(session, user, book_id)
+    data = (body.cover or "").strip()
+    if not data.startswith("data:"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expected a data: url")
+    if len(data) > 4_000_000:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="image too large")
+    source = covers.CUSTOM_PREFIX + secrets.token_hex(4)
+    covers.record_cover(session, user.id, book_id, source, data, label="Custom")
+    covers.set_choice(session, user.id, book_id, source)
+    cover = covers.resolve(session, user.id, book_id)
+    session.commit()
+    return {"cover": cover}
+
+
+@router.delete("/books/{book_id}/cover/custom/{source}")
+def delete_custom_cover(book_id: str, source: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #remove one custom cover (only custom uploads are removable; device covers just re-sync). if it was the
+    #shown one, the choice resets and the book falls back to its first-synced cover.
+    _cover_book(session, user, book_id)
+    if not covers.is_custom(source):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="only custom covers can be removed")
+    covers.remove_source(session, user.id, book_id, source)
+    cover = covers.resolve(session, user.id, book_id)
+    session.commit()
+    return {"cover": cover}
+
+
 @router.get("/books/{book_id}")
 def get_book(book_id: str, profile: str = DEFAULT_PID, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    #the full composed document for one profile, so the web ui can show what's been synced
+    #the full composed document for one profile, so the web ui can show what's been synced. a freshly
+    #adopted book may have no profile yet (we create it lazily on the first context), so fall back to a
+    #transient empty doc rather than 404 — the timeline still works off the book's chapters.
     row = _get_row(session, user, book_id)
-    prof = _get_profile(session, user, book_id, profile)
-    return profiles.compose(row, prof)
+    return profiles.compose_or_transient(session, user.id, row, profile)
 
 
 @router.put("/books/{book_id}")
@@ -207,22 +312,56 @@ def update_book_meta(book_id: str, body: BookMeta, user: User = Depends(get_curr
     return {"series": row.series, "series_index": row.series_index}
 
 
-@router.get("/export")
-def export_all(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    #a self-contained bundle of all this user's books, each with all its profiles
+def _export_items(session, user):
+    #one export item per book, each carrying all its profiles. compose() embeds the cover in every doc's
+    #book meta, and we also surface it top-level so the importer can restore the artwork (pure JSON, no
+    #separate upload).
     rows = session.exec(select(Book).where(Book.user_id == user.id)).all()
     out = []
     for b in rows:
         profs = profiles.list_profiles(session, user.id, b.book_id)
         prof_dump = [{"profile_id": p.profile_id, "name": p.name, "doc": profiles.compose(b, p)} for p in profs]
         out.append({
-            "book_id": b.book_id, "title": b.title, "authors": b.authors,
+            "book_id": b.book_id, "title": b.title, "authors": b.authors, "cover": b.cover,
             "series": b.series, "series_index": b.series_index,
             "profiles": prof_dump,
             #default profile doc kept under "doc" too, so older importers still read something
             "doc": next((p["doc"] for p in prof_dump if p["profile_id"] == DEFAULT_PID), prof_dump[0]["doc"] if prof_dump else new_doc()),
         })
-    return {"type": "context-creator-export", "version": 2, "books": out}
+    return out
+
+
+def _safe_filename(name, fallback):
+    #a filesystem-safe base name for a per-book file in the export zip
+    keep = "".join(c if c.isalnum() or c in " -_." else "_" for c in (name or "")).strip(" .")
+    return keep[:80] or fallback
+
+
+@router.get("/export")
+def export_all(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #a self-contained bundle of all this user's books, each with all its profiles
+    return {"type": "context-creator-export", "version": 2, "books": _export_items(session, user)}
+
+
+@router.get("/export.zip")
+def export_zip(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    #the same data as /export, but as a zip with one importable JSON per book. unlike a single merged
+    #bundle this keeps each book's cover intact, and the import side just takes a folder of these files.
+    items = _export_items(session, user)
+    buf = io.BytesIO()
+    used = set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for it in items:
+            base = _safe_filename(it.get("title") or it.get("book_id"), it.get("book_id") or "book")
+            fn, i = f"{base}.json", 2
+            while fn in used:  #disambiguate same-titled books
+                fn = f"{base} ({i}).json"
+                i += 1
+            used.add(fn)
+            single = {"type": "context-creator-export", "version": 2, "books": [it]}
+            z.writestr(fn, json.dumps(single))
+    headers = {"Content-Disposition": 'attachment; filename="context-creator-contexts.zip"'}
+    return Response(content=buf.getvalue(), media_type="application/zip", headers=headers)
 
 
 def _import_book(session, user, book_id, item):
@@ -249,6 +388,11 @@ def _import_book(session, user, book_id, item):
         book.series = item.get("series") or ""
     if item.get("series_index") is not None:
         book.series_index = item.get("series_index") or 0
+    #restore the cover (embedded in the export as a data: url) when this book doesn't already have one —
+    #never clobber a real cover the device synced
+    cover = item.get("cover") or ((item.get("doc") or {}).get("book") or {}).get("cover")
+    if cover and not (book.cover or ""):
+        book.cover = cover
 
 
 @router.post("/import")
@@ -354,36 +498,21 @@ def list_library(user: User = Depends(get_current_user), session: Session = Depe
 
 @router.post("/library/{book_id}/adopt")
 def adopt_library_book(book_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    #start a (device-bound) contexts book for a device book that has none yet, with a default profile.
-    existing = session.exec(select(Book).where(Book.user_id == user.id, Book.book_id == book_id)).first()
-    if existing:
-        prof = profiles.ensure_profile(session, user.id, book_id, DEFAULT_PID)
-        session.commit()
-        return profiles.compose(existing, prof)
-    entry = session.exec(select(LibraryEntry).where(LibraryEntry.user_id == user.id, LibraryEntry.book_id == book_id)).first()
-    title = entry.title if entry else ""
-    authors = entry.authors if entry else ""
-    cover = entry.cover if entry else ""
-    #seed the web grouping from the book's own metadata series; the user can still re-group by dragging
-    series = entry.series if entry else ""
-    series_index = entry.series_index if entry else 0
-    book = Book(user_id=user.id, book_id=book_id, title=title, authors=authors, cover=cover,
-                series=series, series_index=series_index, source="device", updated=docops.now())
-    session.add(book)
-    doc = new_doc()
-    doc["book"] = {"id": book_id, "title": title, "authors": authors}
-    doc["updated"] = docops.now()
-    prof = Profile(user_id=user.id, book_id=book_id, profile_id=DEFAULT_PID, name="Main",
-                   doc_json=json.dumps(doc), updated=doc["updated"])
-    session.add(prof)
+    #start a (device-bound) contexts book for a device book that has none yet. we create the Book (carrying
+    #its catalog cover/series/title) but DON'T persist a Main profile yet — that's materialised lazily when
+    #the first context is added, so opening-but-not-touching a book doesn't leave an empty profile behind.
+    #the chapters/timeline live on the Book, so they're kept regardless of whether a profile exists.
+    book = profiles.ensure_book(session, user.id, book_id)
+    book.updated = book.updated or docops.now()
     session.commit()
-    return profiles.compose(book, prof)
+    return profiles.compose_or_transient(session, user.id, book, DEFAULT_PID)
 
 
 @router.post("/books/{book_id}/contexts")
 def add_context(book_id: str, body: ContextIn, profile: str = DEFAULT_PID, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     row = _get_row(session, user, book_id)
-    prof = _get_profile(session, user, book_id, profile)
+    #the first context on a freshly adopted book is what actually materialises its Main profile
+    prof = profiles.ensure_profile(session, user.id, book_id, profile)
     doc = profiles.compose(row, prof)
     key = docops.ensure_context(doc, body.title, body.type, body.progress)
     if not key:

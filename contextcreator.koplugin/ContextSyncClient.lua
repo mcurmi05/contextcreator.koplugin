@@ -99,7 +99,10 @@ function ContextSyncClient:pushBook(book_id, doc, profile, name, device)
     if device and device.id and device.id ~= "" then
         q = q .. "&device_id=" .. urlencode(device.id)
         if device.name and device.name ~= "" then q = q .. "&device_name=" .. urlencode(device.name) end
-        if device.chapter and device.chapter ~= "" then q = q .. "&device_chapter=" .. urlencode(device.chapter) end
+        --always send the current chapter, even when empty (e.g. front matter / before the first chapter):
+        --that lets the server clear a stale chapter instead of keeping the last one, which would otherwise
+        --re-anchor the web "jump to current" marker to that old chapter's spot even after reading back.
+        q = q .. "&device_chapter=" .. urlencode(device.chapter or "")
         if type(device.chapter_frac) == "number" then
             q = q .. "&device_chapter_frac=" .. urlencode(string.format("%.6f", device.chapter_frac))
         end
@@ -118,11 +121,28 @@ function ContextSyncClient:listProfiles(book_id)
     return self:request("GET", "/api/sync/books/" .. book_id .. "/profiles")
 end
 
+--rename a profile on the server (so a rename made on the device reaches the web + other devices)
+function ContextSyncClient:renameProfile(book_id, profile_id, name)
+    return self:request("PATCH", "/api/sync/books/" .. book_id .. "/profiles/" .. urlencode(profile_id), { name = name })
+end
+
+--delete a profile on the server (so a delete made on the device reaches the web + other devices)
+function ContextSyncClient:deleteProfile(book_id, profile_id)
+    return self:request("DELETE", "/api/sync/books/" .. book_id .. "/profiles/" .. urlencode(profile_id))
+end
+
 --report the device's book catalog (a list of { book_id, title, authors, cover? }) so the web ui can
---offer to start contexts for books that have no notes yet, and show cover art. cover is a data: url,
---sent only the first time a book is seen.
-function ContextSyncClient:pushLibrary(books)
-    return self:request("POST", "/api/sync/library", rapidjson.array(books))
+--offer to start contexts for books that have no notes yet, and show cover art. cover is a data: url.
+--device (optional) is { id, name }: covers are stored per device on the server so the web can let the
+--user choose which device's cover to show (a grayscale e-ink one vs a colour one), rather than the last
+--sync silently winning.
+function ContextSyncClient:pushLibrary(books, device)
+    local q = ""
+    if device and device.id and device.id ~= "" then
+        q = "?device_id=" .. urlencode(device.id)
+        if device.name and device.name ~= "" then q = q .. "&device_name=" .. urlencode(device.name) end
+    end
+    return self:request("POST", "/api/sync/library" .. q, rapidjson.array(books))
 end
 
 return ContextSyncClient

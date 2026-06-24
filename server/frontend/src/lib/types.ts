@@ -30,7 +30,7 @@ export interface Relationship {
 }
 
 export interface TocEntry { title: string; progress: number; }
-export interface BookMeta { id?: string; title?: string; authors?: string; toc?: TocEntry[]; }
+export interface BookMeta { id?: string; title?: string; authors?: string; cover?: string; toc?: TocEntry[]; }
 
 export interface NodePos { x: number; y: number; }
 
@@ -68,6 +68,7 @@ export interface GraphEditOps {
   setType: (key: string, type: string) => void;
   addAlias: (key: string, text: string) => string | null;  //returns an error message, or null on success
   deleteAlias: (key: string, index: number) => void;
+  promoteAlias: (key: string, index: number) => void;      //make an alias the main context name
   deletePoint: (key: string, ref: PointRef) => void;
   createLink: (from: string, to: string, label: string, directed: boolean) => void;
   editLinkLabel: (id: string, label: string) => void;
@@ -78,7 +79,7 @@ export interface GraphEditOps {
   deleteRelPoint: (id: string, ref: PointRef) => void;
 }
 
-export interface BookSummary { book_id: string; title?: string; authors?: string; cover?: string; series?: string; series_index?: number; source?: string; updated?: number; profiles?: ProfileSummary[]; }
+export interface BookSummary { book_id: string; title?: string; authors?: string; cover?: string; series?: string; series_index?: number; source?: string; updated?: number; reading_progress?: number | null; profiles?: ProfileSummary[]; }
 //a book on the device (from its read history) that has no contexts doc yet
 export interface LibraryEntry { book_id: string; title?: string; authors?: string; cover?: string; series?: string; series_index?: number; }
 export interface User { id: number; username: string; is_admin?: boolean; }

@@ -30,6 +30,7 @@ export interface Theme {
   title: string;
   logo: string | null; //data url
   showUnstarted: boolean; //show device books that have no contexts yet on the home page (default true)
+  showProgress: boolean;  //show a reading-progress bar on each home page book card (default true)
   graph: GraphPrefs;
 }
 
@@ -39,7 +40,7 @@ export const DEFAULT_GRAPH: GraphPrefs = {
 };
 
 export const DEFAULT_THEME: Theme = {
-  accent: "#C2620B", scrub: "#C2620B", title: "Context Creator", logo: null, showUnstarted: true, graph: DEFAULT_GRAPH,
+  accent: "#C2620B", scrub: "#C2620B", title: "Context Creator", logo: null, showUnstarted: true, showProgress: true, graph: DEFAULT_GRAPH,
 };
 
 //fill in any missing graph fields from defaults, so older saved/imported configs still work

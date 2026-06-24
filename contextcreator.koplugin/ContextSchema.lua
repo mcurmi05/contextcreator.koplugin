@@ -96,9 +96,10 @@ function ContextSchema.isEmpty(doc)
     return true
 end
 
---fill in any missing tables/fields so the rest of the code can assume a well-shaped doc
+--fill in any missing tables/fields so the rest of the code can assume a well-shaped doc. deliberately
+--does NOT touch the schema version — migrate() owns that, so an older doc's version can be read before
+--it gets stamped.
 function ContextSchema.normalize(doc)
-    doc.schema = ContextSchema.VERSION
     doc.contexts = doc.contexts or {}
     doc.relationships = doc.relationships or {}
     doc.tombstones = doc.tombstones or {}
@@ -106,6 +107,22 @@ function ContextSchema.normalize(doc)
     doc.tombstones.relationships = doc.tombstones.relationships or {}
     doc.tombstones.points = doc.tombstones.points or {}
     doc.book = doc.book or {}
+    return doc
+end
+
+--bring a doc loaded from disk up to the current schema, then normalise its shape. the schema history so
+--far (1..3) only added fields / relaxed shapes that the readers already tolerate (bare-string points,
+--missing ids/aliases/`directed`/tombstones — see pointText/ensurePointIds and the merge), so reaching v3
+--needs no field rewrites. a FUTURE breaking change adds an explicit, idempotent step here, gated on the
+--source version, e.g.:
+--    if from < 4 then for _, c in pairs(doc.contexts or {}) do ... end end
+--a doc written by a NEWER app keeps its own (higher) version and all its unknown fields — lua tables
+--preserve them untouched — so opening it on an older build is lossless rather than a silent downgrade.
+function ContextSchema.migrate(doc)
+    local from = tonumber(doc and doc.schema) or 1
+    -- (future per-version migration steps go here, smallest version first)
+    ContextSchema.normalize(doc)
+    doc.schema = (from > ContextSchema.VERSION) and from or ContextSchema.VERSION
     return doc
 end
 

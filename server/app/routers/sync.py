@@ -2,15 +2,15 @@
 #profile's book doc, the server additively merges it into what it has, persists the result, and hands the
 #merged doc back for the device to write locally. a book can hold several named profiles; the device picks
 #which it's reading/writing and passes it as ?profile= (default "default"). all scoped to the token's user.
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
-from .. import profiles
-from ..db import get_session
-from ..deps import get_sync_user
-from ..models import Book, LibraryEntry, User
-from ..profiles import DEFAULT_PID
-from ..sync import new_doc
+from ..services import covers, devices, profiles
+from ..core.db import get_session
+from ..core.deps import get_sync_user
+from ..models import Book, LibraryEntry, Profile, User
+from ..services.profiles import DEFAULT_PID
+from ..services.sync import new_doc
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
@@ -34,12 +34,51 @@ def list_book_profiles(book_id: str, user: User = Depends(get_sync_user), sessio
     return out
 
 
+@router.patch("/books/{book_id}/profiles/{profile_id}")
+def rename_sync_profile(book_id: str, profile_id: str, body: dict, user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
+    #rename a profile from the device, so a rename made in koreader reaches the web (and other devices).
+    name = (body.get("name") if isinstance(body, dict) else None) or ""
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="name required")
+    prof = profiles.get_profile(session, user.id, book_id, profile_id)
+    if not prof:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="profile not found")
+    prof.name = name
+    session.commit()
+    return {"profile_id": profile_id, "name": name}
+
+
+@router.delete("/books/{book_id}/profiles/{profile_id}")
+def delete_sync_profile(book_id: str, profile_id: str, user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
+    #delete a profile from the device. mirrors the web delete: if it was the last profile, drop the Book too.
+    rows = profiles.list_profiles(session, user.id, book_id)
+    prof = next((p for p in rows if p.profile_id == profile_id), None)
+    if not prof:
+        return {"deleted": profile_id, "book_removed": False}  #already gone; treat as success
+    profiles.tombstone_profile(session, user.id, book_id, profile_id, prof.updated)  #don't let it resurrect
+    session.delete(prof)
+    book_removed = not [r for r in rows if r.profile_id != profile_id]
+    if book_removed:
+        book = session.exec(select(Book).where(Book.user_id == user.id, Book.book_id == book_id)).first()
+        if book:
+            session.delete(book)
+    session.commit()
+    return {"deleted": profile_id, "book_removed": book_removed}
+
+
 @router.post("/library")
-def push_library(body: list[dict], user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
+def push_library(body: list[dict], device_id: str | None = None, device_name: str | None = None,
+                 user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
     #the device reports its read-history catalog (book_id + title) so the web ui can offer to start a
-    #context for a book that has no notes yet. upsert by book_id, scoped to the user.
+    #context for a book that has no notes yet. upsert by book_id, scoped to the user. each device's cover
+    #is stored under its own source so a grayscale device can't clobber a colour one — the user picks which
+    #to show on the web (see services/covers.py); we ask a device only for covers IT hasn't supplied yet.
+    src = device_id or "device"  #fallback source for older clients that don't identify their device
+    label = devices.resolve_name(session, user.id, src, device_name)  #user-set device name wins
+    have_cover = covers.book_ids_with_source(session, user.id, src)  #books this device already covered
     seen = 0
-    need_cover = []  #book_ids the server still has no cover for, so the device knows to (re)send one
+    need_cover = []
     for it in body or []:
         bid = it.get("book_id")
         if not bid:
@@ -54,28 +93,21 @@ def push_library(body: list[dict], user: User = Depends(get_sync_user), session:
         if row:
             row.title = it.get("title") or row.title
             row.authors = it.get("authors") or row.authors
-            if cover:
-                row.cover = cover
-            #only set series when the device actually sent one, so a later metadata-less push (e.g. a book
-            #whose cover is already done) doesn't wipe a series we resolved earlier
+            #only set series when the device actually sent one, so a later metadata-less push doesn't wipe it
             if series:
                 row.series = series
                 row.series_index = sidx
         else:
             row = LibraryEntry(user_id=user.id, book_id=bid, title=it.get("title") or "",
-                               authors=it.get("authors") or "", cover=cover, series=series, series_index=sidx)
+                               authors=it.get("authors") or "", series=series, series_index=sidx)
             session.add(row)
-        #a book with notes lives as a Book (and is filtered out of /api/library), so push the cover there too.
-        #a cover in the payload is always freshly extracted (first time or a changed one), so overwrite it.
-        book = session.exec(
-            select(Book).where(Book.user_id == user.id, Book.book_id == bid)
-        ).first()
-        if cover and book:
-            book.cover = cover
-        #tell the device to (re)send a cover when we have none, on either the library entry or the started
-        #book. this makes covers self-heal after a server wipe/restore: the device's local "already sent"
-        #memory wouldn't otherwise re-send to the same url, but an empty server here asks for them again.
-        if not ((row.cover or "") or (book.cover if book else "")):
+        if cover:
+            covers.record_cover(session, user.id, bid, src, cover, label=label)
+            covers.resolve(session, user.id, bid)  #refresh the shown cover on the library entry / book
+            have_cover.add(bid)
+        #ask this device to (re)send a cover only for books it hasn't supplied one for (self-heals a wiped
+        #server; a colour device and a grayscale device each fill in their own source independently)
+        if bid not in have_cover:
             need_cover.append(bid)
     session.commit()
     return {"ok": True, "count": seen, "need_cover": need_cover}
@@ -96,6 +128,20 @@ def push_book(book_id: str, body: dict, profile: str = DEFAULT_PID, name: str | 
               device_id: str | None = None, device_name: str | None = None,
               device_chapter: str | None = None, device_chapter_frac: float | None = None,
               user: User = Depends(get_sync_user), session: Session = Depends(get_session)):
+    #if this profile was deleted (on the web or another device), don't let an additive push resurrect it.
+    #only a push carrying real content with a strictly newer `updated` than the deleted version counts as a
+    #genuine post-delete edit and is allowed through (lifting the tombstone). otherwise hand back an empty
+    #doc so the device adopts it and clears its local copy, and the deletion sticks on both sides.
+    version = profiles.profile_tombstone_version(session, user.id, book_id, profile)
+    if version is not None:
+        inc = body or {}
+        has_content = bool(inc.get("contexts")) or bool(inc.get("relationships"))
+        inc_updated = inc.get("updated")
+        inc_updated = inc_updated if isinstance(inc_updated, (int, float)) and not isinstance(inc_updated, bool) else 0
+        if not (has_content and inc_updated > version):
+            session.commit()
+            return new_doc()
+        profiles.clear_profile_tombstone(session, user.id, book_id, profile)  #genuine newer edit -> resurrect
     #additively merge the device's doc for one profile into the stored one, save, return the merged result.
     #this is the device-authoritative path: the device owns the reading position + chapter toc + book meta.
     book, prof, merged = profiles.merge_into_profile(

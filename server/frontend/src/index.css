@@ -22,6 +22,11 @@
 }
 
 @layer components {
+  /* a number input without the up/down spinner buttons */
+  .no-spinner { -moz-appearance: textfield; appearance: textfield; }
+  .no-spinner::-webkit-outer-spin-button,
+  .no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
   /* faint dot grid behind the graph, so the canvas reads as a workspace not a void */
   .graph-canvas {
     background-color: #FAF7F2;

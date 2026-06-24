@@ -72,6 +72,19 @@ class UserPref(SQLModel, table=True):
     home_json: str = "{}"     #the home-page view preferences object
     updated: int = 0
 
+#records that a profile was deleted (on the web or a device). the sync is otherwise purely additive, so
+#without this a device that still holds the notes would silently resurrect a deleted book/profile on its
+#next push. `version` is the profile's `updated` at deletion: a push is only allowed to recreate it when
+#it carries real content with a newer `updated` (a genuine edit made after the delete); anything older or
+#empty is dropped (the device adopts the empty doc back and clears its local copy).
+class ProfileTombstone(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "book_id", "profile_id", name="uq_profiletomb"),)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    book_id: str = Field(index=True)
+    profile_id: str = Field(index=True)
+    version: int = 0   #the profile's `updated` when it was deleted
+
 #a book known to be on the koreader device (from its read history) that may not have a contexts doc yet.
 #lets the web ui offer "start a context for a book you haven't taken notes on".
 class LibraryEntry(SQLModel, table=True):
@@ -85,3 +98,41 @@ class LibraryEntry(SQLModel, table=True):
     series: str = ""          #series name from the book's own metadata, so unadopted books still group
     series_index: int = 0     #0-based order within the series (converted from the book's 1-based metadata)
     updated: int = 0
+
+
+#every cover a source has provided for a book: one row per connecting device (its grayscale/colour
+#extraction) plus an optional user-uploaded "custom" cover. the displayed cover (Book.cover /
+#LibraryEntry.cover) is resolved from these by the user's choice (CoverChoice), defaulting to the freshest.
+#keeping them per-source means a grayscale device no longer overwrites a colour device's cover — the user
+#just picks which one they want.
+class BookCover(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "book_id", "source", name="uq_bookcover"),)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    book_id: str = Field(index=True)
+    source: str = Field(index=True)  #a device id, or "custom" for an uploaded cover
+    label: str = ""                  #friendly name shown in the picker (device model, or "Custom")
+    cover: str = ""                  #the cover art as a data: url
+    updated: int = 0
+
+
+#a user-set custom name for a device, overriding the model name the device reports. names are unique per
+#account so a device is identifiable everywhere (timeline "jump to current", cover picker, settings).
+class Device(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("user_id", "device_id", name="uq_device"),
+        UniqueConstraint("user_id", "name", name="uq_device_name"),
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    device_id: str = Field(index=True)
+    name: str = ""
+
+
+#which cover source the user chose for a book. absent = automatic (freshest source).
+class CoverChoice(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "book_id", name="uq_coverchoice"),)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    book_id: str = Field(index=True)
+    source: str = ""  #the chosen BookCover.source (device id / "custom"); "" means automatic

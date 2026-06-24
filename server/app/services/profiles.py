@@ -7,11 +7,47 @@ import secrets
 
 from sqlmodel import select
 
-from . import docops
-from .models import Book, DevicePosition, LibraryEntry, Profile
+from . import covers, devices, docops
+from ..models import Book, DevicePosition, LibraryEntry, Profile, ProfileTombstone
 from .sync import _normalize, merge, new_doc
 
 DEFAULT_PID = "default"
+
+
+def _tomb(session, user_id, book_id, profile_id):
+    return session.exec(select(ProfileTombstone).where(
+        ProfileTombstone.user_id == user_id, ProfileTombstone.book_id == book_id,
+        ProfileTombstone.profile_id == profile_id)).first()
+
+
+def tombstone_profile(session, user_id, book_id, profile_id, version):
+    #mark a profile as deleted, remembering the content version (`updated`) it had, so a later device push
+    #with strictly newer real content can still resurrect it but a stale/empty replay can't.
+    row = _tomb(session, user_id, book_id, profile_id)
+    if row:
+        row.version = max(row.version or 0, version or 0)
+    else:
+        session.add(ProfileTombstone(user_id=user_id, book_id=book_id, profile_id=profile_id, version=version or 0))
+
+
+def profile_tombstone_version(session, user_id, book_id, profile_id):
+    row = _tomb(session, user_id, book_id, profile_id)
+    return row.version if row else None
+
+
+def clear_profile_tombstone(session, user_id, book_id, profile_id):
+    row = _tomb(session, user_id, book_id, profile_id)
+    if row:
+        session.delete(row)
+
+
+def _without_cover(doc):
+    #the cover is a big data: url and is book-level; compose() re-overlays it from the Book on read, so we
+    #keep it out of the per-profile notes blob we persist (avoids bloating every profile's doc_json).
+    meta = doc.get("book")
+    if isinstance(meta, dict) and meta.get("cover"):
+        return {**doc, "book": {k: v for k, v in meta.items() if k != "cover"}}
+    return doc
 
 
 def record_device_position(session, user_id, book_id, device_id, reading_progress, *,
@@ -33,8 +69,8 @@ def record_device_position(session, user_id, book_id, device_id, reading_progres
         session.add(row)
     row.reading_progress = rp
     row.updated = docops.now()
-    if device_name and device_name.strip():
-        row.device_name = device_name.strip()
+    #a user-set device name overrides the reported one, so a rename sticks across syncs
+    row.device_name = devices.resolve_name(session, user_id, device_id, (device_name or "").strip())
     #chapter is sent on every sync; treat empty as "unknown" but always refresh frac alongside it
     if chapter is not None:
         row.chapter = chapter.strip()
@@ -104,7 +140,13 @@ def add_external_profile(session, user_id, book, doc, *, name):
     pid = gen_profile_id()
     pname = unique_profile_name(session, user_id, book.book_id, name)
     session.add(Profile(user_id=user_id, book_id=book.book_id, profile_id=pid, name=pname,
-                        doc_json=json.dumps(doc), updated=doc["updated"]))
+                        doc_json=json.dumps(_without_cover(doc)), updated=doc["updated"]))
+    #carry a cover over to a coverless external book, so an imported copy can supply the artwork
+    cover = (doc.get("book") or {}).get("cover")
+    if cover:
+        covers.record_cover(session, user_id, book.book_id, "imported", cover, label="Imported file")
+        if not (book.cover or ""):
+            book.cover = cover
     book.updated = max(book.updated or 0, doc["updated"])
     return pid
 
@@ -119,12 +161,15 @@ def create_external_book(session, user_id, doc, *, title, authors, origin_id, pr
     book = Book(user_id=user_id, book_id=bid, source="external", origin_id=origin_id or bid,
                 title=title or meta.get("title") or "Imported contexts",
                 authors=authors or meta.get("authors") or "",
+                cover=meta.get("cover") or "",  #cover travels embedded in the doc, no upload needed
                 toc_json=json.dumps(toc) if isinstance(toc, list) and toc else "[]",
                 reading_progress=doc.get("reading_progress"), updated=doc["updated"])
     session.add(book)
     session.add(Profile(user_id=user_id, book_id=bid, profile_id=DEFAULT_PID,
                         name=(profile_name or "Main").strip() or "Main",
-                        doc_json=json.dumps(doc), updated=doc["updated"]))
+                        doc_json=json.dumps(_without_cover(doc)), updated=doc["updated"]))
+    if meta.get("cover"):  #record it as a selectable source so the cover picker can offer it
+        covers.record_cover(session, user_id, bid, "imported", meta["cover"], label="Imported file")
     return book
 
 
@@ -149,6 +194,8 @@ def compose(book, profile):
     if book.series:
         meta["series"] = book.series
     meta["series_index"] = book.series_index
+    if book.cover:
+        meta["cover"] = book.cover  #embed the cover so an exported doc carries its artwork (pure JSON)
     toc = _toc(book)
     if toc:
         meta["toc"] = toc
@@ -158,6 +205,18 @@ def compose(book, profile):
     #advertise which profile this is so the client can label its picker
     doc["profile"] = {"id": profile.profile_id, "name": profile.name}
     return doc
+
+
+def compose_or_transient(session, user_id, book, profile_id=DEFAULT_PID):
+    #compose the doc for a profile, or — when the book has no such profile yet (e.g. a freshly adopted book
+    #before its first context is added) — compose against a transient empty profile that is NOT persisted.
+    #the book-level chapters/timeline/cover still come through, so the timeline works on an empty book.
+    prof = get_profile(session, user_id, book.book_id, profile_id)
+    if prof is None:
+        prof = Profile(user_id=user_id, book_id=book.book_id, profile_id=profile_id,
+                       name="Main" if profile_id == DEFAULT_PID else "Profile",
+                       doc_json=json.dumps(new_doc()))
+    return compose(book, prof)
 
 
 def _idx0(v):
@@ -195,7 +254,9 @@ def ensure_book(session, user_id, book_id, *, title="", authors="", source="devi
 
 def ensure_profile(session, user_id, book_id, profile_id, *, name=None):
     #fetch a profile, creating an empty one if it's missing (used by sync when the device writes to a
-    #profile that only exists on the device yet, and by adopt/import)
+    #profile that only exists on the device yet, and by adopt/import). `name` only seeds a brand-new
+    #profile — it never renames an existing one, so a name set on the web isn't clobbered by the device
+    #replaying its (possibly stale) local name on every push. device renames go through rename_profile.
     prof = get_profile(session, user_id, book_id, profile_id)
     if prof is None:
         prof = Profile(user_id=user_id, book_id=book_id, profile_id=profile_id,
@@ -203,15 +264,14 @@ def ensure_profile(session, user_id, book_id, profile_id, *, name=None):
                        doc_json=json.dumps(new_doc()))
         session.add(prof)
         session.flush()
-    elif name and name.strip() and prof.name != name.strip():
-        prof.name = name.strip()
+        clear_profile_tombstone(session, user_id, book_id, profile_id)  #re-created -> it's no longer deleted
     return prof
 
 
 def save_profile_doc(profile, book, merged, *, from_device):
     #store the merged doc on the profile, and push the book-level shared fields onto the Book. the device
     #(from_device) owns the reading position + chapter toc + book identity; the web only touches notes.
-    profile.doc_json = json.dumps(merged)
+    profile.doc_json = json.dumps(_without_cover(merged))
     profile.updated = merged.get("updated") or profile.updated
     book.updated = max(book.updated or 0, merged.get("updated") or 0)
     if not from_device:

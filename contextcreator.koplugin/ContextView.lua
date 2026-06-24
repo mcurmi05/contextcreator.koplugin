@@ -41,19 +41,17 @@ local function pointsLabel(n)
     return T(_("%1 dot points"), n)
 end
 
---a Menu that doesn't flash or select its section-header rows (items with _header set).
---Menu rebuilds the row widgets on every page change, so we re-neutralise the headers each time.
---when headers_holdable is set, custom-type headers keep their long-press (so they can be renamed).
+--a Menu whose section-header rows (items with _header set) are tappable to collapse/expand their
+--section but never hold-selectable — except custom-type headers when headers_holdable is set, which keep
+--their long-press so they can be renamed. Menu rebuilds the row widgets on every page change, so we
+--re-apply this each time. the tap itself is handled in onMenuSelect (it toggles the section).
 local SectionedMenu = Menu:extend{}
 function SectionedMenu:updateItems(select_number, no_recalculate_dimen)
     Menu.updateItems(self, select_number, no_recalculate_dimen)
     for _, row in ipairs(self.item_group) do
         local e = row.entry
-        if e and e._header then
-            row.onTapSelect = function() return true end  --consume the tap, no invert flash, no callback
-            if not (self.headers_holdable and e._custom_type) then
-                row.onHoldSelect = function() return true end
-            end
+        if e and e._header and not (self.headers_holdable and e._custom_type) then
+            row.onHoldSelect = function() return true end
         end
     end
 end
@@ -83,7 +81,10 @@ local function contextIntroProgress(node)
     return type(node.progress) == "number" and node.progress or nil
 end
 
-local function groupedContextItems(doc, exclude_key, show_counts, filter_fn)
+--when `expanded` (a type->bool table) is passed, the menu is collapsible: each section header shows a
+--▸/▾ disclosure + its count, and the contexts under it are only listed when that type is expanded. with
+--`expanded` nil the list isn't collapsible (every context is shown), the original behaviour.
+local function groupedContextItems(doc, exclude_key, show_counts, filter_fn, expanded)
     --bucket contexts by type
     local buckets = {}
     for key, node in pairs(doc.contexts) do
@@ -113,20 +114,29 @@ local function groupedContextItems(doc, exclude_key, show_counts, filter_fn)
     end
     sections[#sections + 1] = { type = "unset", header = _("No type") }
 
+    local collapsible = expanded ~= nil
     local items = {}
     for si = 1, #sections do
         local section = sections[si]
         local list = buckets[section.type]
         if list and #list > 0 then
             table.sort(list, function(a, b) return a.title:lower() < b.title:lower() end)
-            table.insert(items, { text = section.header, bold = true, _header = true, _custom_type = section.custom })
-            for ni = 1, #list do
-                local entry = list[ni]
-                table.insert(items, {
-                    text = show_counts and T("%1  (%2)", entry.title, pointsLabel(entry.n)) or entry.title,
-                    _key = entry.key,
-                    _title = entry.title,
-                })
+            local open = (not collapsible) or expanded[section.type]
+            local header_text = section.header
+            if collapsible then --disclosure arrow + count, so a collapsed section still shows how many it holds
+                header_text = T("%1 %2  (%3)", open and "\u{25BE}" or "\u{25B8}", section.header, #list)
+            end
+            table.insert(items, { text = header_text, bold = true, _header = true,
+                                  _custom_type = section.custom, _type = section.type })
+            if open then
+                for ni = 1, #list do
+                    local entry = list[ni]
+                    table.insert(items, {
+                        text = show_counts and T("%1  (%2)", entry.title, pointsLabel(entry.n)) or entry.title,
+                        _key = entry.key,
+                        _title = entry.title,
+                    })
+                end
             end
         end
     end
@@ -161,6 +171,14 @@ ContextView.__index = ContextView
 
 function ContextView:new(store)
     return setmetatable({ store = store }, ContextView)
+end
+
+--repaint the currently-open contexts/points list from the freshly-synced local doc, so an edit made on
+--the webapp (or another device) shows up without a close + reopen. each list view registers a rebuild
+--closure in self._refresh while it's open (cleared when it closes); this just runs it. wrapped in pcall
+--so a stale/closed menu can never turn a background sync into a crash.
+function ContextView:refreshOpen()
+    if self._refresh then pcall(self._refresh) end
 end
 
 --whether to hide context info from beyond the current reading position (contexts not yet introduced,
@@ -476,36 +494,48 @@ function ContextView:createNewContext(name, pos, prev_key)
 end
 
 --pick from the contexts already in this book, then jump straight to a new dot point for it
-function ContextView:showExistingContextPicker(pos)
-    local doc = self.store:load()
-    local items = {}
-    for key, node in pairs(doc.contexts) do
-        local label = ContextSchema.typeLabel(node.type)
-        local text = label ~= "" and T("%1  \u{00B7} %2", node.title, label) or node.title
-        table.insert(items, { text = text, _key = key, _title = node.title })
+--a reusable context picker: contexts grouped under their type headers, each section a collapsible
+--dropdown that starts closed (tap a header to open it). on_pick(menu, key, title) fires on a row tap.
+--exclude_key/filter_fn restrict which contexts are offered. used wherever the user picks a context.
+function ContextView:showContextPicker(opts)
+    local doc = opts.doc or self.store:load()
+    local expanded = {} --type -> true; empty table means every section starts collapsed
+    local function buildItems()
+        return groupedContextItems(doc, opts.exclude_key, opts.show_counts, opts.filter_fn, expanded)
     end
-
-    if #items == 0 then
-        UIManager:show(InfoMessage:new{ text = _("No contexts in this book yet.") })
+    if #buildItems() == 0 then
+        UIManager:show(InfoMessage:new{ text = opts.empty_text or _("No contexts in this book yet.") })
         return
     end
-
-    table.sort(items, function(a, b) return a._title:lower() < b._title:lower() end)
-
     local menu
-    menu = Menu:new{
-        title = _("Pick an existing context"),
-        item_table = items,
+    menu = SectionedMenu:new{
+        title = opts.title,
+        item_table = buildItems(),
         width = Screen:getWidth() - 2 * WINDOW_MARGIN,
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
         is_popout = false,
         onMenuSelect = function(_self, item)
-            UIManager:close(menu)
-            self:editPoint(item._key, item._title, nil, nil, true, pos)
+            if item._header then --tap a type header to collapse/expand its dropdown, rebuilt in place
+                expanded[item._type] = (not expanded[item._type]) and true or nil
+                menu:switchItemTable(opts.title, buildItems())
+                return
+            end
+            opts.on_pick(menu, item._key, item._title)
         end,
         close_callback = function() UIManager:close(menu) end,
     }
     UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
+    return menu
+end
+
+function ContextView:showExistingContextPicker(pos)
+    self:showContextPicker{
+        title = _("Pick an existing context"),
+        on_pick = function(menu, key, title)
+            UIManager:close(menu)
+            self:editPoint(key, title, nil, nil, true, pos)
+        end,
+    }
 end
 
 --brand new context setup, step 2: pick a type, then drop into the first dot point
@@ -601,55 +631,46 @@ end
 --show the dot points for a node as a list. tap to add/edit, long-press to delete.
 --the title carries the node's type (when set) so it stays visible while reading the points.
 function ContextView:showPointsList(key, reveal_all)
-    local doc = self.store:load()
-    local node = doc.contexts[key]
+    local node = self.store:load().contexts[key]
     if not node then return end
-    local points = node.points
 
-    --by default hide dot points noted beyond the current reading position, so the notes don't spoil
-    --what's ahead. the choice is the same persisted setting used by the all-contexts filter.
-    --reveal_all is a one-off override (tapping the "hidden" notice); it isn't persisted, so
-    --reopening this list later goes back to hiding the later notes.
-    local cur = self.store:describeLocator(nil)
-    local progress = cur.progress
-    local hiding = self:getOnlyRead() and progress ~= nil --the setting wants later notes hidden
-    local only_read = hiding and not reveal_all --reveal_all overrides it for this viewing
-
-    local items = {}
-    local later = 0 --notes beyond the reading position that the setting would hide
-    for i, point in ipairs(points) do
-        local beyond = hiding and self:pointBeyond(point, cur)
-        if beyond then later = later + 1 end
-        if only_read and beyond then
-            --noted ahead of where we are, keep it out of sight (index i still maps in node.points)
-        else
-            --dot points are about what you're learning, not bookmarks, so no page shown here.
-            --the location is still stored (long-press a point -> "Go to location" to jump there).
-            table.insert(items, {
-                text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " "), --collapse multi line points to one line
-                _index = i,
-            })
+    --(re)build the rows from the CURRENT local doc, so a synced-in edit (e.g. a dot point added on the
+    --webapp) can repaint the list in place. by default dot points noted beyond the current reading
+    --position are hidden so the notes don't spoil what's ahead (the same persisted setting the all-
+    --contexts filter uses); reveal_all is a one-off override (tapping the "hidden" notice).
+    local function buildItems()
+        local n = self.store:load().contexts[key]
+        if not n then return {}, nil end
+        local cur = self.store:describeLocator(nil)
+        local progress = cur.progress
+        local hiding = self:getOnlyRead() and progress ~= nil
+        local only_read = hiding and not reveal_all
+        local items, later = {}, 0
+        for i, point in ipairs(n.points) do
+            local beyond = hiding and self:pointBeyond(point, cur)
+            if beyond then later = later + 1 end
+            if not (only_read and beyond) then
+                --dot points are about what you're learning, not bookmarks, so no page shown here
+                table.insert(items, {
+                    text = BULLET .. ContextSchema.pointText(point):gsub("%s*\n%s*", " "), --collapse multi line points
+                    _index = i,
+                })
+            end
         end
-    end
-    if later > 0 then
-        if reveal_all then --currently showing the later notes: offer to hide them again
-            table.insert(items, {
-                text = T(_("\u{2026} showing %1 later note(s) \u{00B7} tap to hide"), later),
-                _rehide = true,
-            })
-        else --notes hidden: tap to reveal them for this viewing only
-            table.insert(items, {
-                text = T(_("\u{2026} %1 later note(s) hidden \u{00B7} up to %2% \u{00B7} tap to show"), later, math.floor(progress * 100 + 0.5)),
-                _reveal = true,
-            })
+        if later > 0 then
+            if reveal_all then
+                table.insert(items, { text = T(_("\u{2026} showing %1 later note(s) \u{00B7} tap to hide"), later), _rehide = true })
+            else
+                table.insert(items, { text = T(_("\u{2026} %1 later note(s) hidden \u{00B7} up to %2% \u{00B7} tap to show"), later, math.floor(progress * 100 + 0.5)), _reveal = true })
+            end
         end
+        local label = ContextSchema.typeLabel(n.type)
+        local bracket = label ~= "" and T(_("(%1 context)"), label) or _("(Unset context type)")
+        return items, T(_("%1  \u{00B7} %2"), n.title, bracket)
     end
 
-    local label = ContextSchema.typeLabel(node.type)
-    local bracket = label ~= "" and T(_("(%1 context)"), label) or _("(Unset context type)")
-    local title = T(_("%1  \u{00B7} %2"), node.title, bracket)
-
-    local menu
+    local items, title = buildItems()
+    local menu, rebuild
     menu = Menu:new{
         title = title,
         item_table = items,
@@ -671,9 +692,13 @@ function ContextView:showPointsList(key, reveal_all)
             return true
         end,
         close_callback = function()
+            if self._refresh == rebuild then self._refresh = nil end --stop live-refreshing this closed list
             UIManager:close(menu)
         end,
     }
+    --a synced-in change repaints the open list in place (rebuilt from the fresh doc), no close + reopen
+    rebuild = function() local it, ti = buildItems(); if ti then menu:switchItemTable(ti, it) end end
+    self._refresh = rebuild
 
     --flank the bottom page-navigation bar: "All contexts" on the left, then this context's
     --relationships and "Add dot point" on the right
@@ -915,32 +940,38 @@ function ContextView:showAllContexts()
     --how far the reader has read (0..1), used by the "only up to here" filter. nil if we can't tell,
     --in which case the filter is unavailable and we just show everything.
     local progress = self.store:describeLocator(nil).progress
-    local only_read = self:getOnlyRead() and progress ~= nil
+    local expanded = {} --type -> true; every type group starts collapsed (tap a header to open it)
 
-    local filter_fn = only_read and function(_key, node)
-        local intro = contextIntroProgress(node)
-        --keep contexts introduced at or before here, ones with no known spot stay visible (can't place them)
-        return intro == nil or intro <= progress + 1e-6
-    end or nil
-
-    local items = groupedContextItems(doc, nil, true, filter_fn)
-
-    --a tappable row at the very top to flip between all contexts and only those up to the reading spot
-    if progress ~= nil then
-        local pct = math.floor(progress * 100 + 0.5)
-        table.insert(items, 1, {
-            text = only_read
-                and T(_("\u{25C9} Up to where you've read (%1%) \u{2022} tap to show all"), pct)
-                or T(_("\u{25CB} Showing all \u{2022} tap to show only up to %1%"), pct),
-            bold = true,
-            _toggle = true,
-        })
+    --(re)build the row list for the current "only up to here" filter and collapse state. reloads the doc
+    --each call so a synced-in edit repaints the list (counts + new contexts) without a close + reopen.
+    local function buildItems()
+        local doc = self.store:load()
+        local only_read = self:getOnlyRead() and progress ~= nil
+        local filter_fn = only_read and function(_key, node)
+            local intro = contextIntroProgress(node)
+            --keep contexts introduced at or before here; ones with no known spot stay visible (can't place them)
+            return intro == nil or intro <= progress + 1e-6
+        end or nil
+        local items = groupedContextItems(doc, nil, true, filter_fn, expanded)
+        --a tappable row at the very top to flip between all contexts and only those up to the reading spot
+        if progress ~= nil then
+            local pct = math.floor(progress * 100 + 0.5)
+            table.insert(items, 1, {
+                text = only_read
+                    and T(_("\u{25C9} Up to where you've read (%1%) \u{2022} tap to show all"), pct)
+                    or T(_("\u{25CB} Showing all \u{2022} tap to show only up to %1%"), pct),
+                bold = true,
+                _toggle = true,
+            })
+        end
+        return items
     end
 
-    local menu
+    local title = T(_("Contexts: %1"), self.store:getBookTitle())
+    local menu, rebuild
     menu = SectionedMenu:new{
-        title = T(_("Contexts: %1"), self.store:getBookTitle()),
-        item_table = items,
+        title = title,
+        item_table = buildItems(),
         headers_holdable = true, --custom-type headers can be long-pressed to rename
         width = Screen:getWidth() - 2 * WINDOW_MARGIN,
         height = Screen:getHeight() - 2 * WINDOW_MARGIN,
@@ -948,11 +979,14 @@ function ContextView:showAllContexts()
         onMenuSelect = function(_self, item)
             if item._toggle then --flip the (persisted) filter and rebuild the list in place
                 self:setOnlyRead(not self:getOnlyRead())
-                UIManager:close(menu)
-                self:showAllContexts()
+                menu:switchItemTable(title, buildItems())
                 return
             end
-            if item._header then return end --section headers aren't tappable
+            if item._header then --tap a type header to collapse/expand its dropdown
+                expanded[item._type] = (not expanded[item._type]) and true or nil
+                menu:switchItemTable(title, buildItems())
+                return
+            end
             UIManager:close(menu)
             self:openContext(item._key)
         end,
@@ -966,9 +1000,13 @@ function ContextView:showAllContexts()
             return true
         end,
         close_callback = function()
+            if self._refresh == rebuild then self._refresh = nil end --stop live-refreshing this closed list
             UIManager:close(menu)
         end,
     }
+    --a synced-in change (new context / dot point / count) repaints this list in place
+    rebuild = function() menu:switchItemTable(title, buildItems()) end
+    self._refresh = rebuild
 
     --a "Relationships" shortcut on the bottom bar once any links exist, opening the book-wide list
     if #doc.relationships > 0 then
@@ -1341,37 +1379,19 @@ end
 --pick an existing context to attach the highlighted word to as an alias, then open it.
 --used from the "open/create context" flows when the word is really another name for a context.
 function ContextView:addWordAsAlias(word)
-    local doc = self.store:load()
-    local items = {}
-    for key, node in pairs(doc.contexts) do
-        local label = ContextSchema.typeLabel(node.type)
-        local text = label ~= "" and T("%1  \u{00B7} %2", node.title, label) or node.title
-        table.insert(items, { text = text, _key = key, _title = node.title })
-    end
-    if #items == 0 then
-        UIManager:show(InfoMessage:new{ text = _("No contexts in this book yet.") })
-        return
-    end
-    table.sort(items, function(a, b) return a._title:lower() < b._title:lower() end)
-
-    local menu
-    menu = Menu:new{
+    --the target list is grouped under its type headers (each a collapsible dropdown), like every other
+    --context list, so you pick the context to attach this alias to from within its type group.
+    self:showContextPicker{
         title = T(_("Add \u{201C}%1\u{201D} as an alias of\u{2026}"), ContextText.trim(word)),
-        item_table = items,
-        width = Screen:getWidth() - 2 * WINDOW_MARGIN,
-        height = Screen:getHeight() - 2 * WINDOW_MARGIN,
-        is_popout = false,
-        onMenuSelect = function(_self, item)
+        on_pick = function(menu, key, _title)
             local d = self.store:load()
-            if self:tryAddAlias(d, item._key, word) then
+            if self:tryAddAlias(d, key, word) then
                 self.store:save(d)
                 UIManager:close(menu)
-                self:showPointsList(item._key) --open the context the word now belongs to
+                self:showPointsList(key) --open the context the word now belongs to
             end
         end,
-        close_callback = function() UIManager:close(menu) end,
     }
-    UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
 end
 
 --prompt for a new alias, refusing names that already resolve to a context, then add it
@@ -1455,33 +1475,16 @@ end
 --grouped by type like the all-contexts list, with the node we're linking from left out.
 function ContextView:showLinkPicker(menu, from_key)
     local doc = self.store:load()
-    local items = groupedContextItems(doc, from_key, false)
-
-    if #items == 0 then
-        UIManager:show(InfoMessage:new{
-            text = _("There is no other context to link to yet."),
-        })
-        return
-    end
-
-    local picker
-    picker = SectionedMenu:new{
+    self:showContextPicker{
+        doc = doc,
         title = T(_("Link \u{201C}%1\u{201D} to\u{2026}"), ContextSchema.titleForKey(doc, from_key)),
-        item_table = items,
-        width = Screen:getWidth() - 2 * WINDOW_MARGIN,
-        height = Screen:getHeight() - 2 * WINDOW_MARGIN,
-        is_popout = false,
-        onMenuSelect = function(_self, item)
-            if item._header then return end --section headers aren't tappable
+        exclude_key = from_key,
+        empty_text = _("There is no other context to link to yet."),
+        on_pick = function(picker, key, _title)
             UIManager:close(picker)
-            self:editRelationshipLabel(menu, from_key, item._key)
+            self:editRelationshipLabel(menu, from_key, key)
         end,
-        onMenuHold = function(_self, item)
-            return true --no per-node action here
-        end,
-        close_callback = function() UIManager:close(picker) end,
     }
-    UIManager:show(picker, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
 end
 
 --name the link (e.g. "married to", "lives in"), then ask which way it points, then create it

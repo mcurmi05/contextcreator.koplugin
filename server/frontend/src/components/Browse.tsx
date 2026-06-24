@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { pointText, pointProgress, contextProgress, colorFor, typeLabel, TYPE_LABELS } from "./model";
-import { btnAccent, input } from "./ui";
-import type { Doc, Selected } from "./types";
+import { pointText, pointProgress, contextProgress, colorFor, typeLabel, TYPE_LABELS } from "../lib/model";
+import { btnAccent, input } from "../lib/ui";
+import type { Doc, Selected } from "../lib/types";
 
 const BUILTIN_ORDER = ["character", "place", "object", "concept"];
 

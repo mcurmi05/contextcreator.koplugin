@@ -21,9 +21,9 @@ local ContextSyncClient = require("ContextSyncClient")
 
 --how long after the last change before we actually push (coalesces a burst of edits into one sync)
 local DEBOUNCE_SECONDS = 2
---how often to poll the server while a book is open, so web edits show up without a manual sync.
---each tick is skipped instantly when offline, so it won't keep wifi awake on a real device.
-local PERIODIC_SECONDS = 15
+--how often to poll the server while a book is open, so web edits show up (in an open list, even) without
+--a manual sync. each tick is skipped instantly when offline, so it won't keep wifi awake on a real device.
+local PERIODIC_SECONDS = 5
 --gap between cover-extraction batches when draining the backlog (see syncLibrary). small batches keep
 --each pass non-blocking; chaining them fills a whole library within a minute of one app start.
 local COVER_DRAIN_SECONDS = 4
@@ -87,13 +87,15 @@ function ContextSync:scheduleSync()
     UIManager:scheduleIn(DEBOUNCE_SECONDS, self._pending)
 end
 
---flush a pending debounced push immediately (used on book close so changes don't wait)
+--flush on book close: cancel any pending debounced push and sync now, so the FINAL state goes up —
+--including the reading position, which may have moved (even backwards) without any note edit to trigger
+--a debounce. otherwise a backwards jump right before closing wouldn't reach the web until the next open.
 function ContextSync:flush()
     if self._pending then
         UIManager:unschedule(self._pending)
         self._pending = nil
-        self:syncNow()
     end
+    self:syncNow()
 end
 
 --poll the server every PERIODIC_SECONDS while the book is open, so changes made on the web (or
@@ -104,6 +106,7 @@ function ContextSync:startPeriodic()
     self._periodic = function()
         self._periodic = nil
         self:syncNow()
+        self:syncProfiles() -- so profile renames/deletes made on the web show up without reopening
         self:startPeriodic() -- schedule the next tick (no-op if it got disabled meanwhile)
     end
     UIManager:scheduleIn(PERIODIC_SECONDS, self._periodic)
@@ -158,6 +161,7 @@ function ContextSync:syncNow(interactive)
     --push (including periodic ones) so it tracks reading, not just note edits. the merged result we adopt
     --carries it back, so the local file stays current too.
     local doc = self.store:load()
+    local before = doc.updated --so we can tell if the merge brought new content in (web/other-device edit)
     local loc = self.store:describeLocator(nil)
     if loc.progress then doc.reading_progress = loc.progress end
     --push the active profile, passing its name so a freshly created one registers server-side, and this
@@ -170,7 +174,13 @@ function ContextSync:syncNow(interactive)
     local ok, merged = client:pushBook(book_id, doc, profile, self.store:getProfileName(profile), dev)
     if ok and type(merged) == "table" and merged.contexts then
         self._auth_prompted = false -- the credentials clearly work, re-arm the 401 prompt for next time
+        self.store:markProfileSynced(profile) -- it now exists server-side (lets syncProfiles spot web deletes)
         self.store:replace(merged) -- adopt the merged result without re-triggering a sync
+        --if the merge actually brought something new in (a web/other-device edit, e.g. a dot point added
+        --on the webapp), tell the UI so an open list repaints in place instead of needing a close + reopen.
+        if type(merged.updated) == "number" and merged.updated ~= before and type(self.on_synced) == "function" then
+            self.on_synced()
+        end
         if interactive then
             UIManager:show(InfoMessage:new{ text = _("Synced.") })
         end
@@ -428,7 +438,8 @@ function ContextSync:_pushCatalog(books)
         payload[#payload + 1] = item
     end
     local s = self:settings()
-    local ok, resp = ContextSyncClient:new(s.server, s.username, s.password):pushLibrary(payload)
+    --identify this device so the server keeps its covers separate (the web lets the user pick which to show)
+    local ok, resp = ContextSyncClient:new(s.server, s.username, s.password):pushLibrary(payload, self:deviceInfo())
     if not ok and resp == 401 then self:authFailed() end
     if ok and #fresh > 0 then self:markCoversTried(fresh) end
     --adopt the server's list of covers it's still missing, so the next drain pass re-sends those. this is
@@ -526,20 +537,64 @@ function ContextSync:syncProfiles()
         return
     end
     if type(list) ~= "table" then return end
-    local by_id, order = {}, {}
-    for _, p in ipairs(self.store:getProfileList()) do
-        if not by_id[p.id] then by_id[p.id] = { id = p.id, name = p.name }; order[#order + 1] = p.id end
+    --the server's authoritative profile set, by id
+    local server = {}
+    for _, p in ipairs(list) do if p.profile_id then server[p.profile_id] = p end end
+
+    local local_list = self.store:getProfileList()
+    local merged, seen = {}, {}
+    --walk local profiles in order: adopt the server name when present; drop ones the server no longer has
+    --(deleted on the web) UNLESS they're brand-new local-only profiles not yet pushed (kept until synced).
+    for _, p in ipairs(local_list) do
+        local sp = server[p.id]
+        if sp then
+            merged[#merged + 1] = { id = p.id, name = sp.name or p.name, synced = true }
+            seen[p.id] = true
+        elseif p.id == "default" then
+            merged[#merged + 1] = { id = p.id, name = p.name, synced = p.synced } --default always exists
+            seen[p.id] = true
+        elseif not p.synced then
+            merged[#merged + 1] = { id = p.id, name = p.name, synced = false } --not pushed yet, keep it
+            seen[p.id] = true
+        end
+        --else: was synced before, gone from the server now => deleted on the web, so drop it (below)
     end
+    --append profiles the server knows that we didn't have locally (made on the web / another device)
     for _, p in ipairs(list) do
-        local id = p.profile_id
-        if id then
-            if by_id[id] then by_id[id].name = p.name or by_id[id].name
-            else by_id[id] = { id = id, name = p.name or id }; order[#order + 1] = id end
+        if p.profile_id and not seen[p.profile_id] then
+            merged[#merged + 1] = { id = p.profile_id, name = p.name or p.profile_id, synced = true }
+            seen[p.profile_id] = true
         end
     end
-    local merged = {}
-    for _, id in ipairs(order) do merged[#merged + 1] = by_id[id] end
-    if #merged > 0 then self.store:setProfileList(merged) end
+    --clean up local files for any profiles we just dropped (deleted on the web)
+    for _, p in ipairs(local_list) do
+        if not seen[p.id] then os.remove(self.store:profileFilePath(p.id)) end
+    end
+
+    self.store:setProfileList(merged) --also re-points the active selection if it was a dropped profile
+end
+
+--push a profile rename made on the device up to the server (best-effort), so the web + other devices
+--pick it up. the local list is renamed by the caller; this just propagates it.
+function ContextSync:renameProfileRemote(id, name)
+    if not self:isConfigured() then return end
+    if NetworkMgr and NetworkMgr.isConnected and not NetworkMgr:isConnected() then return end
+    local book_id = self.store:getBookId()
+    if not book_id then return end
+    local s = self:settings()
+    local ok, resp = ContextSyncClient:new(s.server, s.username, s.password):renameProfile(book_id, id, name)
+    if not ok and resp == 401 then self:authFailed() end
+end
+
+--push a profile delete made on the device up to the server (best-effort).
+function ContextSync:deleteProfileRemote(id)
+    if not self:isConfigured() then return end
+    if NetworkMgr and NetworkMgr.isConnected and not NetworkMgr:isConnected() then return end
+    local book_id = self.store:getBookId()
+    if not book_id then return end
+    local s = self:settings()
+    local ok, resp = ContextSyncClient:new(s.server, s.username, s.password):deleteProfile(book_id, id)
+    if not ok and resp == 401 then self:authFailed() end
 end
 
 --a single text setting (server url / token), edited through an input dialog
