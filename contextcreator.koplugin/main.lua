@@ -15,6 +15,7 @@ local T = require("ffi/util").template
 local ContextStore = require("ContextStore")
 local ContextView = require("ContextView")
 local ContextSync = require("ContextSync")
+local ContextAI = require("ContextAI")
 
 local ContextCreator = WidgetContainer:extend{
     name = "contextcreator",
@@ -45,7 +46,10 @@ function ContextCreator:init()
 
     --storage + UI for the currently open book
     self.store = ContextStore:new(self.ui)
-    self.view = ContextView:new(self.store)
+    --bring-your-own-key generative AI (chapter summaries + context suggestions). holds no state itself,
+    --reads its config from G_reader_settings on demand, so it's cheap to construct unconditionally.
+    self.ai = ContextAI:new()
+    self.view = ContextView:new(self.store, self.ai)
 
     --seamless sync: push (debounced) after any change, pull on open, flush on close
     self.sync = ContextSync:new(self.store)
@@ -118,6 +122,21 @@ function ContextCreator:init()
                 end,
             }
         end)
+        --AI shortcuts for the chapter you're reading. show_in_highlight_dialog_func is re-evaluated each
+        --time the popup opens, so toggling AI off/hidden drops these without needing to reopen the book.
+        --(the dialog builder indexes the returned button directly, so we must return a table, not nil.)
+        self.ui.highlight:addToHighlightDialog("17_contextcreator_ai_summary", function(this)
+            return {
+                text = _("AI: chapter summary"),
+                --shown whenever AI isn't hidden (even before setup): tapping opens the chapter's summary if
+                --one exists, otherwise offers to generate it (walking setup first if needed).
+                show_in_highlight_dialog_func = function() return not self.ai:isHidden() end,
+                callback = function()
+                    this:onClose()
+                    self.view:chapterSummaryFromHighlight()
+                end,
+            }
+        end)
     end
 end
 
@@ -137,12 +156,161 @@ function ContextCreator:addToMainMenu(menu_items)
                 sub_item_table_func = function() return self:profilesMenu() end,
             },
             {
+                --always present so a hidden user can always find the unhide toggle; the submenu itself
+                --collapses to just that toggle while AI is hidden (see aiMenu).
+                text = _("AI"),
+                sub_item_table_func = function() return self:aiMenu() end,
+            },
+            {
                 text = _("Sync"),
                 sub_item_table_func = function() return self.sync:menu() end,
             },
         },
     }
 end
+
+--the "AI" submenu: provider/key/model + how much prior context to send, the summarize/suggest actions,
+--and the master hide switch. while hidden it shows only the unhide toggle, so there's always a way back.
+function ContextCreator:aiMenu()
+    local ai = self.ai
+    if ai:isHidden() then
+        return {
+            {
+                text = _("Show AI features"),
+                help_text = _("AI features are hidden. Turn this on to bring back the AI menu items and the highlight buttons."),
+                checked_func = function() return not ai:isHidden() end,
+                callback = function(touchmenu)
+                    ai:set("hidden", false)
+                    if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
+                end,
+            },
+        }
+    end
+
+    --provider radio list
+    local provider_items = {}
+    for _, pid in ipairs(ContextAI.PROVIDER_ORDER) do
+        local id = pid
+        provider_items[#provider_items + 1] = {
+            text = ContextAI.PROVIDERS[id].label,
+            checked_func = function() return ai:getProvider() == id end,
+            callback = function() ai:set("provider", id) end,
+        }
+    end
+
+    --how much prior context to include, each with a cost note
+    local function priorItem(value, text, help)
+        return {
+            text = text,
+            help_text = help,
+            checked_func = function() return ai:getPriorContext() == value end,
+            callback = function() ai:set("prior_context", value) end,
+        }
+    end
+    local prior_items = {
+        priorItem(ContextAI.PRIOR_NONE, _("None (chapter only)"),
+            _("Cheapest. The AI only sees the chosen chapter's text.")),
+        priorItem(ContextAI.PRIOR_NOTES, _("Your existing notes"),
+            _("Also sends your contexts/notes up to this chapter so the AI can link things. A little more cost.")),
+        priorItem(ContextAI.PRIOR_SUMMARIES, _("Notes + earlier summaries"),
+            _("Also sends earlier chapter summaries. Best linking, but the most tokens (highest cost and latency).")),
+    }
+
+    return {
+        {
+            text = _("Enable AI features"),
+            checked_func = function() return ai:settings().enabled == true end,
+            callback = function() ai:set("enabled", not ai:settings().enabled) end,
+        },
+        {
+            text_func = function()
+                local p = ContextAI.PROVIDERS[ai:getProvider()]
+                return T(_("Provider: %1"), (p and p.label) or ai:getProvider())
+            end,
+            sub_item_table = provider_items,
+        },
+        {
+            text_func = function()
+                local k = ai:settings().api_key
+                return (k and k ~= "") and _("API key: set (tap to change)") or _("API key\u{2026}")
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu) self:promptApiKey(touchmenu) end,
+        },
+        {
+            text_func = function() return T(_("Model: %1"), ai:getModel()) end,
+            help_text = _("Pick from the models your key can use (fetched live), instead of typing an id."),
+            keep_menu_open = true,
+            callback = function(touchmenu)
+                self.view:chooseModel(function()
+                    if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
+                end)
+            end,
+        },
+        {
+            text = _("Prior context sent to the AI"),
+            sub_item_table = prior_items,
+            separator = true,
+        },
+        {
+            text = _("Build full profile from book\u{2026}"),
+            help_text = _("Reads the whole (finished) book in one pass and writes a new profile: a summary for every chapter plus the plot's characters/places/objects/concepts. Warns about token cost first."),
+            keep_menu_open = true,
+            callback = function() self.view:generateBookProfile() end,
+        },
+        {
+            text = _("Summarize a chapter\u{2026}"),
+            keep_menu_open = true,
+            callback = function() self.view:showChapterPicker() end,
+        },
+        {
+            text = _("View chapter summaries\u{2026}"),
+            keep_menu_open = true,
+            callback = function() self.view:showSummariesList() end,
+        },
+        {
+            text = _("Hide all AI features"),
+            separator = true,
+            help_text = _("Removes every AI menu item and highlight button. The AI menu keeps a \"Show AI features\" toggle so you can turn it back on."),
+            checked_func = function() return ai:isHidden() end,
+            callback = function(touchmenu)
+                ai:set("hidden", true)
+                if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
+            end,
+        },
+    }
+end
+
+--enter the provider API key (masked). saving also flips AI on, mirroring how logging in enables sync.
+function ContextCreator:promptApiKey(touchmenu)
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Provider API key"),
+        input = "",
+        input_hint = _("paste your API key (kept on this device)"),
+        text_type = "password",
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            {
+                text = _("Save"),
+                is_enter_default = true,
+                callback = function()
+                    local key = (dialog:getInputText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                    UIManager:close(dialog)
+                    if key ~= "" then
+                        self.ai:set("api_key", key)
+                        if not self.ai:settings().enabled then self.ai:set("enabled", true) end
+                        if touchmenu and touchmenu.updateItems then touchmenu:updateItems() end
+                    end
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
 
 --the "Profile" submenu: pick which of the book's context docs to read/write here (independent of the
 --web's choice), or make a new one. switching reloads the view and syncs so its contents come down.

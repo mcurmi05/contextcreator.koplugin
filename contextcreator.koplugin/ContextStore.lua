@@ -162,6 +162,67 @@ function ContextStore:addProfile(name)
     return id
 end
 
+--book-level chapter summaries (AI-generated or hand-written), SHARED across every profile of the book.
+--they live here in G_reader_settings keyed by the book (NOT inside any one profile's json), so all
+--profiles show the same set without drift. load() folds the map onto doc.book so the summaries ride
+--along in every export + sync push. keyed by ContextText.normalizeWord(chapter title), so the key is
+--stable across devices. each value is { text, updated, source = "ai"|"user", model? }.
+function ContextStore:summariesSetting()
+    return G_reader_settings:readSetting("contextcreator_chapter_summaries") or {}
+end
+
+function ContextStore:getBookSummaries()
+    local all = self:summariesSetting()
+    return all[self:getBookKey()] or {}
+end
+
+function ContextStore:saveBookSummaries(map)
+    local all = self:summariesSetting()
+    all[self:getBookKey()] = map
+    G_reader_settings:saveSetting("contextcreator_chapter_summaries", all)
+end
+
+--set/replace one chapter's summary (stamping `updated` for last-write-wins), persist, and fire
+--on_change so the sync layer schedules a push (the pushed doc carries the map via load()). chapter is
+--the raw TOC title; we normalize it to the stored key. returns the stored entry, or nil if no title.
+function ContextStore:setChapterSummary(chapter_title, text, source, model)
+    local key = ContextText.normalizeWord(chapter_title)
+    if key == "" then return nil end
+    local map = self:getBookSummaries()
+    map[key] = { text = text, updated = ContextSchema.now(), source = source or "ai", model = model }
+    self:saveBookSummaries(map)
+    if self.on_change and not self._suppress then self.on_change() end
+    return map[key]
+end
+
+--read one chapter's summary entry by raw TOC title, or nil.
+function ContextStore:getChapterSummary(chapter_title)
+    local key = ContextText.normalizeWord(chapter_title or "")
+    if key == "" then return nil end
+    return self:getBookSummaries()[key]
+end
+
+--fold chapter summaries arriving in a merged/synced doc back into the authoritative per-book map
+--(last-write-wins per chapter by `updated`), so a summary made on another device/the web lands in the
+--shared map and then shows in every local profile. does NOT fire on_change (adopting, not editing).
+function ContextStore:adoptBookSummaries(incoming)
+    if type(incoming) ~= "table" then return end
+    local map = self:getBookSummaries()
+    local changed = false
+    for key, entry in pairs(incoming) do
+        if type(entry) == "table" and entry.text then
+            local cur = map[key]
+            local cur_u = cur and tonumber(cur.updated) or -1
+            local in_u = tonumber(entry.updated) or 0
+            if not cur or in_u > cur_u then
+                map[key] = { text = entry.text, updated = in_u, source = entry.source or "ai", model = entry.model }
+                changed = true
+            end
+        end
+    end
+    if changed then self:saveBookSummaries(map) end
+end
+
 --the stable per book id used for sync, koreaders partial md5 of the file (same hash kosync uses,
 --robust against title/filename changes). may be nil for some formats, we still work without it
 function ContextStore:getBookId()
@@ -290,6 +351,144 @@ function ContextStore:buildTocSnapshot()
     return out
 end
 
+--max characters of a chapter's text we send to the AI, and how many pdf pages we'll scan per chapter:
+--keeps token cost + latency (and a blocking http call) bounded on big chapters. 60k chars (~15k tokens,
+--~10k words) covers essentially every novel chapter in full.
+local CHAPTER_TEXT_BUDGET = 60000
+local PDF_PAGE_CAP = 80
+
+--the book's chapters as { { title, pos0, pos1 }, ... } in reading order, where pos0/pos1 bound a chapter
+--for text extraction: xpointers for reflowable (epub/CRE) books, page numbers for paged (pdf) ones. pos1
+--is the next chapter's start (the last chapter runs to the end of the book). nil if there's no usable TOC.
+function ContextStore:getChapterList()
+    local ui = self.ui
+    local doc = ui.document
+    local toc = ui.toc and ui.toc.toc
+    if not doc or not toc or #toc == 0 then return nil end
+    local out = {}
+    if ui.rolling then
+        --reflowable: bound each chapter by consecutive TOC xpointers
+        local marks = {}
+        for _, item in ipairs(toc) do
+            if item.xpointer then marks[#marks + 1] = { title = item.title, xp = item.xpointer } end
+        end
+        if #marks == 0 then return nil end
+        --document-end xpointer so the final chapter has an upper bound (no "next" TOC entry)
+        local last_xp
+        local okc, pc = pcall(function() return doc:getPageCount() end)
+        if okc and pc and pc > 0 then
+            local oke, xp = pcall(function() return doc:getPageXPointer(pc) end)
+            if oke then last_xp = xp end
+        end
+        for i, m in ipairs(marks) do
+            out[#out + 1] = { title = m.title, pos0 = m.xp, pos1 = (marks[i + 1] and marks[i + 1].xp) or last_xp }
+        end
+    else
+        --paged (pdf): bound each chapter by page numbers
+        local total
+        local okn, pc = pcall(function() return doc:getPageCount() end)
+        if okn then total = pc end
+        local marks = {}
+        for _, item in ipairs(toc) do
+            if item.page then marks[#marks + 1] = { title = item.title, page = item.page } end
+        end
+        if #marks == 0 then return nil end
+        for i, m in ipairs(marks) do
+            local nextp = (marks[i + 1] and (marks[i + 1].page - 1)) or total
+            out[#out + 1] = { title = m.title, pos0 = m.page, pos1 = nextp }
+        end
+    end
+    if #out == 0 then return nil end
+    return out
+end
+
+--flatten the nested line/word-box structure pdf text comes back as into a plain string
+function ContextStore:flattenTextBoxes(boxes)
+    local words = {}
+    for _, line in ipairs(boxes or {}) do
+        if type(line) == "table" then
+            for _, box in ipairs(line) do
+                if type(box) == "table" and box.word then words[#words + 1] = box.word end
+            end
+        end
+    end
+    return table.concat(words, " ")
+end
+
+--extract a chapter's text given pos0/pos1 from getChapterList. returns (text, truncated) on success or
+--(nil, err) on failure. CRE/epub reads the text between the two chapter xpointers; pdf concatenates page
+--text across the chapter's page range (capped). text is truncated to a character budget for cost/latency.
+function ContextStore:getChapterText(pos0, pos1)
+    local ui = self.ui
+    local doc = ui.document
+    if not doc then return nil, "no document" end
+    local text
+    if ui.rolling then
+        if type(pos0) ~= "string" or type(pos1) ~= "string" then return nil, "no chapter bounds" end
+        local ok, t = pcall(function() return doc:getTextFromXPointers(pos0, pos1) end)
+        if ok and type(t) == "string" then text = t end
+    else
+        local p0, p1 = tonumber(pos0), tonumber(pos1)
+        if not p0 then return nil, "no chapter bounds" end
+        p1 = p1 or p0
+        if p1 < p0 then p1 = p0 end
+        if p1 - p0 + 1 > PDF_PAGE_CAP then p1 = p0 + PDF_PAGE_CAP - 1 end
+        local parts = {}
+        for p = p0, p1 do
+            local ok, boxes = pcall(function() return doc:getPageTextBoxes(p) end)
+            if ok and boxes then
+                local s = self:flattenTextBoxes(boxes)
+                if s ~= "" then parts[#parts + 1] = s end
+            end
+        end
+        text = table.concat(parts, "\n")
+    end
+    if not text or text == "" then return nil, "no text" end
+    local truncated = false
+    if #text > CHAPTER_TEXT_BUDGET then
+        text = text:sub(1, CHAPTER_TEXT_BUDGET)
+        truncated = true
+    end
+    return text, truncated
+end
+
+--how many characters of book text go into a SINGLE ai call. the whole book is split into consecutive
+--chunks of about this size so a long book is covered fully across several calls (each fast enough to beat
+--the http timeout and small enough that the reply isn't truncated), instead of trimming the book.
+--~160k chars ≈ 40k tokens per call.
+local PER_CALL_BUDGET = 160000
+
+--split the whole book into ordered chunks for the multi-call "build profile" pass. each chunk is
+--{ text = "## title\n...## title\n...", titles = { chapter titles in this chunk } }, with the text under
+--PER_CALL_BUDGET (a single oversized chapter still gets its own chunk). returns the chunk list (covering
+--EVERY chapter) or nil if the book has no readable chapters.
+function ContextStore:getBookChunks()
+    local chapters = self:getChapterList()
+    if not chapters then return nil end
+    local chunks = {}
+    local cur = { text = {}, titles = {}, total = 0 }
+    local function flush()
+        if #cur.titles > 0 then
+            chunks[#chunks + 1] = { text = table.concat(cur.text, "\n\n"), titles = cur.titles }
+        end
+        cur = { text = {}, titles = {}, total = 0 }
+    end
+    for _, ch in ipairs(chapters) do
+        local t = self:getChapterText(ch.pos0, ch.pos1)
+        if t and t ~= "" then
+            local block = "## " .. (ch.title or "") .. "\n" .. t
+            --start a new chunk before this chapter if the current one is non-empty and would overflow
+            if cur.total > 0 and cur.total + #block > PER_CALL_BUDGET then flush() end
+            cur.text[#cur.text + 1] = block
+            cur.titles[#cur.titles + 1] = ch.title
+            cur.total = cur.total + #block
+        end
+    end
+    flush()
+    if #chunks == 0 then return nil end
+    return chunks
+end
+
 --jump the reader to a stored locator (pushing the current spot onto the back stack first so the
 --reader's "back" returns here). returns true if it could navigate.
 function ContextStore:gotoLocator(pos)
@@ -344,6 +543,14 @@ function ContextStore:load()
     if not doc.book.toc then
         doc.book.toc = self:buildTocSnapshot()
     end
+    --book-level chapter summaries live in G_reader_settings, shared across all profiles. fold any copy
+    --carried in this profile's json (e.g. an imported doc) into that shared map, then surface the shared
+    --map on the doc so it rides along in every export + sync push and shows in every profile.
+    if type(doc.book.chapter_summaries) == "table" and next(doc.book.chapter_summaries) ~= nil then
+        self:adoptBookSummaries(doc.book.chapter_summaries)
+    end
+    local sums = self:getBookSummaries()
+    doc.book.chapter_summaries = (next(sums) ~= nil) and sums or nil
 
     --persist freshly assigned point ids so they're stable across loads (without triggering a sync)
     if ids_added then self:replace(doc) end

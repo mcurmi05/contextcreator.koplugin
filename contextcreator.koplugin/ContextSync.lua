@@ -176,6 +176,11 @@ function ContextSync:syncNow(interactive)
         self._auth_prompted = false -- the credentials clearly work, re-arm the 401 prompt for next time
         self.store:markProfileSynced(profile) -- it now exists server-side (lets syncProfiles spot web deletes)
         self.store:replace(merged) -- adopt the merged result without re-triggering a sync
+        --fold any chapter summaries the merge brought down into the shared per-book map (last-write-wins),
+        --so a summary made on another device/the web shows in every local profile of this book
+        if merged.book and merged.book.chapter_summaries then
+            self.store:adoptBookSummaries(merged.book.chapter_summaries)
+        end
         --if the merge actually brought something new in (a web/other-device edit, e.g. a dot point added
         --on the webapp), tell the UI so an open list repaints in place instead of needing a close + reopen.
         if type(merged.updated) == "number" and merged.updated ~= before and type(self.on_synced) == "function" then

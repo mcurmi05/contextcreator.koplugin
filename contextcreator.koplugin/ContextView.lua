@@ -20,6 +20,7 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local ContextText = require("ContextText")
 local ContextSchema = require("ContextSchema")
+local ContextAI = require("ContextAI")
 
 --bullet shown in front of each dot point in the list view
 local BULLET = "\u{2022} "
@@ -169,8 +170,8 @@ end
 local ContextView = {}
 ContextView.__index = ContextView
 
-function ContextView:new(store)
-    return setmetatable({ store = store }, ContextView)
+function ContextView:new(store, ai)
+    return setmetatable({ store = store, ai = ai }, ContextView)
 end
 
 --repaint the currently-open contexts/points list from the freshly-synced local doc, so an edit made on
@@ -1869,6 +1870,568 @@ function ContextView:showRelPointActions(menu, rel_id, index)
         },
     }
     UIManager:show(dialog)
+end
+
+
+--AI: chapter summaries + "read this chapter, suggest contexts"
+
+--guard: AI must be configured + enabled. shows a hint and returns false if not.
+function ContextView:aiReady()
+    if self.ai and self.ai:isEnabled() then return true end
+    UIManager:show(InfoMessage:new{
+        text = _("AI features aren't set up. Open Context Creator \u{2192} AI to pick a provider and enter your API key."),
+    })
+    return false
+end
+
+--show a blocking AI call behind a dismissable "working…" message: paint the message, then (after a
+--tick so it actually shows) run the blocking http call, close the message, and hand the result to done.
+function ContextView:aiRun(message, work, done)
+    local info = InfoMessage:new{ text = message }
+    UIManager:show(info)
+    UIManager:scheduleIn(0.1, function()
+        local ok, res = work()
+        UIManager:close(info)
+        done(ok, res)
+    end)
+end
+
+--the locator (xpointer string / { page } table) for a chapter entry from store:getChapterList
+function ContextView:chapterLocator(entry)
+    if type(entry.pos0) == "string" then return entry.pos0 end
+    if type(entry.pos0) == "number" then return { page = entry.pos0 } end
+    return nil
+end
+
+--a chapter's 0..1 progress, for spoiler-filtering the context block and anchoring applied contexts
+function ContextView:chapterProgress(entry)
+    local loc = self:chapterLocator(entry)
+    if not loc then return nil end
+    return self.store:describeLocator(loc).progress
+end
+
+--build the compact, spoiler-filtered notes string the AI gets as continuity context, per the
+--prior-context setting (none / existing notes / notes + earlier summaries). only includes contexts +
+--points introduced at or before `progress`, so a mid-book request can't leak later-book notes.
+function ContextView:buildContextBlock(doc, progress, tier)
+    tier = tier or ContextAI.PRIOR_NONE
+    if tier == ContextAI.PRIOR_NONE then return "" end
+    local out = {}
+
+    --earlier chapter summaries first (only the "summaries" tier), in reading order up to here
+    if tier == ContextAI.PRIOR_SUMMARIES then
+        local toc = doc.book and doc.book.toc
+        local sums = doc.book and doc.book.chapter_summaries
+        if toc and sums then
+            local s = {}
+            for _, t in ipairs(toc) do
+                if progress == nil or (type(t.progress) == "number" and t.progress <= progress + 1e-6) then
+                    local e = sums[ContextText.normalizeWord(t.title)]
+                    if e and e.text and e.text ~= "" then s[#s + 1] = t.title .. ": " .. e.text end
+                end
+            end
+            if #s > 0 then out[#out + 1] = "Earlier chapter summaries:\n" .. table.concat(s, "\n") end
+        end
+    end
+
+    --then existing contexts (spoiler-filtered) as compact one-liners, ordered by where they appear
+    local items = {}
+    for _, node in pairs(doc.contexts) do
+        local intro = contextIntroProgress(node)
+        if progress == nil or intro == nil or intro <= progress + 1e-6 then
+            items[#items + 1] = { node = node, intro = intro or 0 }
+        end
+    end
+    table.sort(items, function(a, b) return a.intro < b.intro end)
+    local note_lines = {}
+    for _, it in ipairs(items) do
+        local node = it.node
+        local pts = {}
+        for _, p in ipairs(node.points or {}) do
+            local pr = pointProgress(p)
+            if progress == nil or pr == nil or pr <= progress + 1e-6 then
+                pts[#pts + 1] = ContextSchema.pointText(p)
+            end
+        end
+        local label = ContextSchema.typeLabel(node.type)
+        local head = node.title .. (label ~= "" and (" (" .. label .. ")") or "")
+        note_lines[#note_lines + 1] = "- " .. head .. (#pts > 0 and (": " .. table.concat(pts, "; ")) or "")
+    end
+    if #note_lines > 0 then out[#out + 1] = "Known so far:\n" .. table.concat(note_lines, "\n") end
+
+    local block = table.concat(out, "\n\n")
+    if #block > 12000 then block = block:sub(1, 12000) end --keep continuity context bounded (cost)
+    return block
+end
+
+--pick the model from a dropdown built by asking the provider what the current key can use, rather than
+--making the user type an id. `after` (optional) runs once a model is chosen (used by the setup wizard).
+function ContextView:chooseModel(after)
+    local key = self.ai:settings().api_key
+    if not key or key == "" then
+        UIManager:show(InfoMessage:new{ text = _("Enter your API key first, then pick a model.") })
+        return
+    end
+    self:aiRun(_("Fetching available models\u{2026}"), function()
+        return self.ai:listModels()
+    end, function(ok, models)
+        if not ok then
+            UIManager:show(InfoMessage:new{ text = T(_("Couldn't list models: %1"), tostring(models)) })
+            return
+        end
+        if #models == 0 then
+            UIManager:show(InfoMessage:new{ text = _("No usable models for this key.") })
+            return
+        end
+        local current = self.ai:getModel()
+        local items = {}
+        for _mi, id in ipairs(models) do --not `_`: avoid shadowing the gettext `_`
+            items[#items + 1] = { text = (id == current) and ("\u{2713} " .. id) or id, _id = id }
+        end
+        local menu
+        menu = Menu:new{
+            title = _("Choose a model"),
+            item_table = items,
+            width = Screen:getWidth() - 2 * WINDOW_MARGIN,
+            height = Screen:getHeight() - 2 * WINDOW_MARGIN,
+            is_popout = false,
+            onMenuSelect = function(_self, item)
+                self.ai:set("model", item._id)
+                UIManager:close(menu)
+                if after then after() end
+            end,
+            close_callback = function() UIManager:close(menu) end,
+        }
+        UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
+    end)
+end
+
+--make sure AI is configured before an action that needs it. if it already is, run `after` straight away;
+--otherwise walk a tiny setup wizard (provider -> key -> model) and continue to `after` at the end.
+function ContextView:ensureConfigured(after)
+    if self.ai:isEnabled() then if after then after() end return end
+    self:wizardProvider(after)
+end
+
+function ContextView:wizardProvider(after)
+    local dialog
+    local buttons = {}
+    for _pi, pid in ipairs(ContextAI.PROVIDER_ORDER) do --not `_`: avoid shadowing gettext `_`
+        local id = pid
+        buttons[#buttons + 1] = {{
+            text = ContextAI.PROVIDERS[id].label,
+            callback = function()
+                UIManager:close(dialog)
+                self.ai:set("provider", id)
+                self:wizardKey(after)
+            end,
+        }}
+    end
+    dialog = ButtonDialog:new{ title = _("Choose an AI provider"), title_align = "center", buttons = buttons }
+    UIManager:show(dialog)
+end
+
+function ContextView:wizardKey(after)
+    local prov = ContextAI.PROVIDERS[self.ai:getProvider()]
+    local dialog
+    dialog = InputDialog:new{
+        title = T(_("%1 API key"), (prov and prov.label) or _("Provider")),
+        input = self.ai:settings().api_key or "",
+        input_hint = _("paste your API key (kept on this device)"),
+        text_type = "password",
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            {
+                text = _("Next"),
+                is_enter_default = true,
+                callback = function()
+                    local k = (dialog:getInputText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                    UIManager:close(dialog)
+                    if k == "" then return end
+                    self.ai:set("api_key", k)
+                    self.ai:set("enabled", true)
+                    --let them pick a model from the key, then continue to the original action
+                    self:chooseModel(after)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+--highlight-popup action: show the current chapter's summary if one exists, otherwise offer to generate
+--it (running the setup wizard first if AI isn't configured yet).
+function ContextView:chapterSummaryFromHighlight()
+    if self.ai:isHidden() then return end
+    local entry = self:currentChapterEntry()
+    if not entry then
+        UIManager:show(InfoMessage:new{ text = _("Couldn't tell which chapter you're in.") })
+        return
+    end
+    if self.store:getChapterSummary(entry.title) then
+        self:showChapterSummary(entry.title)
+        return
+    end
+    UIManager:show(ConfirmBox:new{
+        text = T(_("No summary yet for \u{201C}%1\u{201D}. Generate one with AI?"), entry.title),
+        ok_text = _("Generate"),
+        ok_callback = function()
+            self:ensureConfigured(function() self:generateSummary(entry) end)
+        end,
+    })
+end
+
+--the chapter picker: a list of the book's chapters, tapping one runs `mode` ("summarize"/"suggest").
+function ContextView:showChapterPicker()
+    if not self:aiReady() then return end
+    local chapters = self.store:getChapterList()
+    if not chapters then
+        UIManager:show(InfoMessage:new{
+            text = _("This book has no chapters the AI can read (no usable table of contents)."),
+        })
+        return
+    end
+    local sums = self.store:getBookSummaries()
+    local items = {}
+    for _ci, ch in ipairs(chapters) do --not `_`: that would shadow the gettext `_` we call below
+        local e = sums[ContextText.normalizeWord(ch.title)]
+        local suffix = e and (e.source == "user" and _(" \u{2022} edited") or _(" \u{2022} AI")) or ""
+        items[#items + 1] = { text = (ch.title or _("(untitled)")) .. suffix, _entry = ch }
+    end
+    local menu
+    menu = Menu:new{
+        title = _("Summarize a chapter"),
+        item_table = items,
+        width = Screen:getWidth() - 2 * WINDOW_MARGIN,
+        height = Screen:getHeight() - 2 * WINDOW_MARGIN,
+        is_popout = false,
+        onMenuSelect = function(_self, item)
+            UIManager:close(menu)
+            self:chapterSummaryActions(item._entry)
+        end,
+        close_callback = function() UIManager:close(menu) end,
+    }
+    UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
+end
+
+--find the chapter list entry for the chapter the reader is currently in (by matching the TOC title at
+--the live position), so the highlight-popup shortcut can act on "this chapter" without a picker.
+function ContextView:currentChapterEntry()
+    local chapters = self.store:getChapterList()
+    if not chapters then return nil end
+    local cur = self.store:describeLocator(nil).chapter
+    if cur and cur ~= "" then
+        for _, ch in ipairs(chapters) do
+            if ch.title == cur then return ch end
+        end
+    end
+    return nil
+end
+
+--what to do for a chapter the user picked to summarize: straight to generation if there's no summary
+--yet, otherwise offer view / edit / regenerate.
+function ContextView:chapterSummaryActions(entry)
+    if not self.store:getChapterSummary(entry.title) then
+        self:generateSummary(entry)
+        return
+    end
+    local dialog
+    dialog = ButtonDialog:new{
+        title = entry.title,
+        title_align = "center",
+        buttons = {
+            {{ text = _("View summary"), callback = function() UIManager:close(dialog); self:showChapterSummary(entry.title) end }},
+            {{ text = _("Edit summary"), callback = function() UIManager:close(dialog); self:editChapterSummary(entry.title) end }},
+            {{ text = _("Regenerate with AI"), callback = function() UIManager:close(dialog); self:generateSummary(entry) end }},
+            {{ text = _("Cancel"), callback = function() UIManager:close(dialog) end }},
+        },
+    }
+    UIManager:show(dialog)
+end
+
+--read the chapter's text, build the continuity context, ask the AI for a summary, store + show it
+function ContextView:generateSummary(entry)
+    if not self:aiReady() then return end
+    local text = self.store:getChapterText(entry.pos0, entry.pos1)
+    if not text then
+        UIManager:show(InfoMessage:new{ text = _("Couldn't read this chapter's text.") })
+        return
+    end
+    local doc = self.store:load()
+    local block = self:buildContextBlock(doc, self:chapterProgress(entry), self.ai:getPriorContext())
+    self:aiRun(_("Asking the AI to summarize this chapter\u{2026}"), function()
+        return self.ai:summarizeChapter(entry.title, text, block)
+    end, function(ok, res)
+        if not ok then
+            UIManager:show(InfoMessage:new{ text = T(_("AI error: %1"), tostring(res)) })
+            return
+        end
+        self.store:setChapterSummary(entry.title, res, "ai", self.ai:getModel())
+        self:refreshOpen()
+        self:showChapterSummary(entry.title)
+    end)
+end
+
+--show a stored chapter summary in a scrollable viewer, with an Edit shortcut
+function ContextView:showChapterSummary(chapter_title)
+    local entry = self.store:getChapterSummary(chapter_title)
+    if not entry then
+        UIManager:show(InfoMessage:new{ text = _("No summary for this chapter yet.") })
+        return
+    end
+    local TextViewer = require("ui/widget/textviewer")
+    local tag = (entry.source == "user") and _("edited") or _("AI")
+    local viewer
+    viewer = TextViewer:new{
+        title = chapter_title .. " (" .. tag .. ")",
+        text = entry.text,
+        buttons_table = {{
+            { text = _("Edit"), callback = function() UIManager:close(viewer); self:editChapterSummary(chapter_title) end },
+            { text = _("Close"), is_enter_default = true, callback = function() UIManager:close(viewer) end },
+        }},
+    }
+    UIManager:show(viewer)
+end
+
+--hand-edit a chapter summary (marks it source="user" so it shows as edited and a re-summarize warns)
+function ContextView:editChapterSummary(chapter_title)
+    local entry = self.store:getChapterSummary(chapter_title)
+    local dialog
+    dialog = InputDialog:new{
+        title = T(_("Edit summary: %1"), chapter_title),
+        input = entry and entry.text or "",
+        input_hint = _("Chapter summary\u{2026}"),
+        allow_newline = true,
+        text_height = Screen:scaleBySize(220),
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            {
+                text = _("Save"),
+                is_enter_default = true,
+                callback = function()
+                    local text = ContextText.trim(dialog:getInputText())
+                    UIManager:close(dialog)
+                    if text == "" then return end
+                    self.store:setChapterSummary(chapter_title, text, "user")
+                    self:refreshOpen()
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+--a viewer-style list of every chapter that has a summary (in reading order), tap to open it
+function ContextView:showSummariesList()
+    if not (self.ai and not self.ai:isHidden()) then return end
+    local doc = self.store:load()
+    local sums = doc.book and doc.book.chapter_summaries or {}
+    local toc = doc.book and doc.book.toc or {}
+    local items, seen = {}, {}
+    for _ti, t in ipairs(toc) do --not `_`: that would shadow the gettext `_` we call below
+        local key = ContextText.normalizeWord(t.title)
+        local e = sums[key]
+        if e and not seen[key] then
+            seen[key] = true
+            local title = t.title
+            local tag = (e.source == "user") and _(" \u{2022} edited") or _(" \u{2022} AI")
+            items[#items + 1] = { text = title .. tag, _title = title }
+        end
+    end
+    if #items == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No chapter summaries yet.") })
+        return
+    end
+    local menu
+    menu = Menu:new{
+        title = _("Chapter summaries"),
+        item_table = items,
+        width = Screen:getWidth() - 2 * WINDOW_MARGIN,
+        height = Screen:getHeight() - 2 * WINDOW_MARGIN,
+        is_popout = false,
+        onMenuSelect = function(_self, item) self:showChapterSummary(item._title) end,
+        close_callback = function() UIManager:close(menu) end,
+    }
+    UIManager:show(menu, nil, nil, WINDOW_MARGIN, WINDOW_MARGIN)
+end
+
+--ENTRY POINT for the one-click "read the whole book -> build a full profile" feature. confirms setup,
+--then warns about the (potentially large) token cost before doing anything.
+function ContextView:generateBookProfile()
+    if self.ai:isHidden() then return end
+    local chapters = self.store:getChapterList()
+    if not chapters then
+        UIManager:show(InfoMessage:new{ text = _("This book has no chapters the AI can read (no usable table of contents).") })
+        return
+    end
+    self:ensureConfigured(function() self:confirmBookProfile(chapters) end)
+end
+
+--the token-cost warning, specific to this feature. the WHOLE book is covered, split into N parts (calls).
+function ContextView:confirmBookProfile(chapters)
+    local chunks = self.store:getBookChunks()
+    if not chunks then
+        UIManager:show(InfoMessage:new{ text = _("Couldn't read this book's text.") })
+        return
+    end
+    local total = 0
+    for _, c in ipairs(chunks) do total = total + #c.text end
+    local ktok = math.floor(total / 4 / 1000 + 0.5) --rough: ~4 chars per token
+    local prov = ContextAI.PROVIDERS[self.ai:getProvider()]
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Read the whole book and build a full AI profile?\n\nThe entire book (~%1k tokens) is sent to %2 across %3 part(s), then a chapter-by-chapter profile (a summary for every chapter plus the plot's characters/places/objects/concepts) is written into a NEW profile, leaving your current notes untouched.\n\n\u{26A0} This can use a large amount of your API quota or paid credits, and may take several minutes. If a part fails it is retried once, then skipped so the rest still go through.\n\nContinue?"),
+            ktok, (prov and prov.label) or _("the AI"), #chunks),
+        ok_text = _("Continue"),
+        ok_callback = function() self:runBookProfile(chapters, chunks) end,
+    })
+end
+
+--a compact recap of what's been gathered so far, fed to each later chunk so a book processed in parts
+--keeps continuity (the AI extends known entries instead of starting fresh each part). bounded for cost.
+function ContextView:storySoFar(acc)
+    local out = {}
+    if #acc.summaries > 0 then
+        local s = {}
+        for _, su in ipairs(acc.summaries) do s[#s + 1] = su.title .. ": " .. su.text end
+        out[#out + 1] = "Chapters summarized so far:\n" .. table.concat(s, "\n")
+    end
+    if #acc.order > 0 then
+        local c = {}
+        for _, key in ipairs(acc.order) do
+            local node = acc.byKey[key]
+            local pts = {}
+            for _, p in ipairs(node.points) do pts[#pts + 1] = p.text end
+            c[#c + 1] = "- " .. node.title .. " (" .. (node.type or "") .. "): " .. table.concat(pts, "; ")
+        end
+        out[#out + 1] = "Entries tracked so far:\n" .. table.concat(c, "\n")
+    end
+    local block = table.concat(out, "\n\n")
+    if #block > 16000 then block = block:sub(1, 16000) end --keep the recap bounded as it grows
+    return block
+end
+
+--merge one chunk's result into the running accumulator (contexts unioned by normalized title, points
+--de-duplicated by text; summaries appended in order).
+function ContextView:mergeIntoAcc(acc, res)
+    for _, c in ipairs(res.contexts or {}) do
+        local key = ContextText.normalizeWord(c.title)
+        if key ~= "" then
+            local node = acc.byKey[key]
+            if not node then
+                node = { title = c.title, type = c.type, points = {}, seen = {} }
+                acc.byKey[key] = node
+                acc.order[#acc.order + 1] = key
+            end
+            if (node.type == nil or node.type == "" or node.type == "unset") and c.type and c.type ~= "unset" then
+                node.type = c.type
+            end
+            for _, pt in ipairs(c.points or {}) do
+                if pt.text and not node.seen[pt.text] then
+                    node.seen[pt.text] = true
+                    node.points[#node.points + 1] = pt
+                end
+            end
+        end
+    end
+    for _, s in ipairs(res.summaries or {}) do acc.summaries[#acc.summaries + 1] = s end
+end
+
+--process the book chunk by chunk (each its own blocking call): show progress, merge the result, retry a
+--failed part once, then continue so a single timeout doesn't lose the rest. write the merged profile at the end.
+function ContextView:runBookProfile(chapters, chunks)
+    local acc = { byKey = {}, order = {}, summaries = {} }
+    local failed = 0
+    local function finish()
+        local res = { contexts = {}, summaries = acc.summaries }
+        for _, key in ipairs(acc.order) do res.contexts[#res.contexts + 1] = acc.byKey[key] end
+        if #res.contexts == 0 and #res.summaries == 0 then
+            UIManager:show(InfoMessage:new{ text = _("The AI didn't return anything usable.") })
+            return
+        end
+        self:writeBookProfile(chapters, res, failed)
+    end
+    local function step(i, attempt)
+        if i > #chunks then finish() return end
+        local chunk = chunks[i]
+        local msg = (attempt > 1)
+            and T(_("Reading the book\u{2026} part %1 of %2 (retry)"), i, #chunks)
+            or T(_("Reading the book\u{2026} part %1 of %2"), i, #chunks)
+        local story = self:storySoFar(acc)
+        self:aiRun(msg, function()
+            return self.ai:generateBookProfile(self.store:getBookTitle(), chunk.text, chunk.titles, story)
+        end, function(ok, res)
+            if ok and res then
+                self:mergeIntoAcc(acc, res)
+                step(i + 1, 1)
+            elseif attempt < 2 then
+                step(i, attempt + 1) --retry this part once
+            else
+                failed = failed + 1
+                step(i + 1, 1) --give up on this part, keep going so the rest still go through
+            end
+        end)
+    end
+    step(1, 1)
+end
+
+--write the AI's result into a brand-new profile: contexts (each point anchored to the chapter it came
+--from, so they land on the timeline) plus a book-level summary for every chapter. a fresh profile means
+--this never clobbers the user's own notes. chapter summaries that the user hand-edited are preserved.
+function ContextView:writeBookProfile(chapters, res, failed)
+    --chapter title (normalized) -> timeline anchor { pos, progress, chapter }
+    local anchorByChapter = {}
+    for _, ch in ipairs(chapters) do
+        anchorByChapter[ContextText.normalizeWord(ch.title)] = self.store:describeLocator(self:chapterLocator(ch)) or {}
+    end
+    local function anchorFor(chapter_title)
+        return (chapter_title and anchorByChapter[ContextText.normalizeWord(chapter_title)]) or {}
+    end
+
+    --1. a fresh profile, made active, so we never touch the user's existing notes
+    self.store:addProfile(T(_("AI: %1"), self.ai:getModel()))
+    local doc = self.store:load() --the new, empty profile doc
+
+    --2. contexts, each point anchored to the chapter the AI tied it to
+    local ncontexts = 0
+    for _, c in ipairs(res.contexts or {}) do
+        local key = ContextText.normalizeWord(c.title)
+        if key ~= "" and not doc.contexts[key] then
+            local node = { title = c.title, type = ContextSchema.resolveType(c.type), points = {}, updated = ContextSchema.now() }
+            for _, pt in ipairs(c.points or {}) do
+                table.insert(node.points, ContextSchema.newPoint(pt.text, anchorFor(pt.chapter)))
+            end
+            --anchor the node itself to its earliest point so it sits at the right spot on the timeline
+            local minp, minch
+            for _, pp in ipairs(node.points) do
+                if type(pp.progress) == "number" and (minp == nil or pp.progress < minp) then
+                    minp, minch = pp.progress, pp.chapter
+                end
+            end
+            if minp then node.progress = minp; node.chapter = minch end
+            doc.contexts[key] = node
+            ncontexts = ncontexts + 1
+        end
+    end
+    self.store:save(doc)
+
+    --3. chapter summaries (book-level, shared across profiles) — never overwrite a hand-edited one
+    local nsum = 0
+    for _, s in ipairs(res.summaries or {}) do
+        local existing = self.store:getChapterSummary(s.title)
+        if not (existing and existing.source == "user") then
+            self.store:setChapterSummary(s.title, s.text, "ai", self.ai:getModel())
+            nsum = nsum + 1
+        end
+    end
+
+    local note = (failed and failed > 0)
+        and T(_("\n\n%1 part(s) failed, so this profile may be incomplete."), failed) or ""
+    UIManager:show(InfoMessage:new{
+        text = T(_("Created a new AI profile with %1 context(s) and %2 chapter summaries.%3"), ncontexts, nsum, note),
+    })
+    if ncontexts > 0 then self:showAllContexts() end
 end
 
 return ContextView

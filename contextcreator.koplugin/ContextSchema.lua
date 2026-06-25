@@ -7,8 +7,11 @@ pure, it just works on plain doc tables and has no KOReader or filesystem depend
 
 doc shape:
   {
-    schema = 3,
-    book = { id, title, authors, toc = { { title, progress }, ... } },  -- toc: chapter bands for the webapp timeline
+    schema = 4,
+    book = { id, title, authors, toc = { { title, progress }, ... }, chapter_summaries = { [chapter_key] = { text, updated, source, model } } },
+    -- toc: chapter bands for the webapp timeline. chapter_summaries: BOOK-LEVEL (shared across every
+    -- profile of the book, embedded in every export) AI/hand-written per-chapter summaries, keyed by
+    -- normalizeWord(chapter title). source is "ai" or "user"; updated stamps each one for sync merge.
     updated = <epoch>,                                  -- file-level last change, for cheap sync checks
     contexts = { [key] = { title, type, points, updated, progress, chapter, aliases } },  -- key = normalizeWord(title)
     -- aliases (optional) is a list of extra display names a highlighted word can match to this context
@@ -27,7 +30,7 @@ doc shape:
 local ContextSchema = {}
 
 --current on disk schema version
-ContextSchema.VERSION = 3
+ContextSchema.VERSION = 4
 
 --the kinds of thing a node can be. "unset" is the default until the user picks one.
 --the keys are stored on disk (and synced), the labels are just what we show the user, so we can
@@ -111,9 +114,10 @@ function ContextSchema.normalize(doc)
 end
 
 --bring a doc loaded from disk up to the current schema, then normalise its shape. the schema history so
---far (1..3) only added fields / relaxed shapes that the readers already tolerate (bare-string points,
---missing ids/aliases/`directed`/tombstones — see pointText/ensurePointIds and the merge), so reaching v3
---needs no field rewrites. a FUTURE breaking change adds an explicit, idempotent step here, gated on the
+--far (1..4) only added fields / relaxed shapes that the readers already tolerate (bare-string points,
+--missing ids/aliases/`directed`/tombstones — see pointText/ensurePointIds and the merge; v4 added the
+--purely additive book.chapter_summaries map), so reaching v4 needs no field rewrites. a FUTURE breaking
+--change adds an explicit, idempotent step here, gated on the
 --source version, e.g.:
 --    if from < 4 then for _, c in pairs(doc.contexts or {}) do ... end end
 --a doc written by a NEWER app keeps its own (higher) version and all its unknown fields — lua tables
@@ -194,6 +198,28 @@ end
 function ContextSchema.titleForKey(doc, key)
     local context = doc.contexts[key]
     return (context and context.title) or key
+end
+
+--book-level chapter summaries, keyed by an already-normalized chapter key (callers normalize the TOC
+--title with ContextText.normalizeWord, kept out of here so this module stays KOReader/dependency-free).
+--read a chapter's summary entry { text, updated, source, model }, or nil.
+function ContextSchema.getChapterSummary(doc, chapter_key)
+    local m = doc.book and doc.book.chapter_summaries
+    return m and m[chapter_key] or nil
+end
+
+--set/replace a chapter's summary, stamping `updated` so a later last-write-wins merge can compare.
+--source is "ai" or "user" (a hand-edit), model (optional) records which model produced an AI one.
+function ContextSchema.setChapterSummary(doc, chapter_key, text, source, model)
+    doc.book = doc.book or {}
+    doc.book.chapter_summaries = doc.book.chapter_summaries or {}
+    doc.book.chapter_summaries[chapter_key] = {
+        text = text,
+        updated = ContextSchema.now(),
+        source = source or "ai",
+        model = model,
+    }
+    return doc.book.chapter_summaries[chapter_key]
 end
 
 --find a relationship (and its array index) by id
